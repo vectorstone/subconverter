@@ -11,6 +11,12 @@
 
 ## 新增内容
 
+2026/2/27
+
+-   新增 SS 链接 dialer 参数说明（`x-sc-underlying-proxy`），并同步中英文文档
+-   SS 解析新增对 `x-sc-underlying-proxy` 的支持，兼容 `underlying-proxy` 与 `underlying_proxy` 旧参数
+-   导出 SS 节点链接时自动追加 `x-sc-underlying-proxy` 参数
+
 2021/10/1
 
 -   新增 [配置文件](#配置文件) 中 `[advanced]` 部分的说明
@@ -80,6 +86,7 @@
         -   [调用地址](#调用地址)
         -   [调用说明](#调用说明)
         -   [简易转换](#简易转换)
+        -   [Dialer 节点参数 (SS 链接)](#dialer-ss-links)
 
     -   [进阶用法](#进阶用法)
 
@@ -273,6 +280,22 @@ http://127.0.0.1:25500/surge2clash?link=Surge的订阅链接
 ```
 
 此处 `Surge的订阅链接`**不需要进行URLEncode**，且**无需任何额外配置**。
+
+<a id="dialer-ss-links"></a>
+
+### Dialer 节点参数 (SS 链接)
+
+如需将 Shadowsocks 节点标记为 dialer 节点，请在查询参数（`#` 前）追加 `x-sc-underlying-proxy=dialer`。
+
+示例：
+
+```txt
+ss://YWVzLTEyOC1nY206VGVzdFBhc3N3b3Jk@198.51.100.10:443/?x-sc-underlying-proxy=dialer#example-dialer
+
+ss://YWVzLTEyOC1nY206VGVzdFBhc3N3b3Jk@198.51.100.10:443/?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Dexample.com&x-sc-underlying-proxy=dialer#example-dialer
+```
+
+为保持兼容，`underlying-proxy=dialer` 与 `underlying_proxy=dialer` 也可继续使用。
 
 * * *
 

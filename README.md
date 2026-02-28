@@ -16,6 +16,7 @@ Utility to convert between various proxy subscription formats.
   - [Quick Usage](#quick-usage)
     - [Access Interface](#access-interface)
     - [Description](#description)
+    - [Dialer Node Parameter (SS Links)](#dialer-node-parameter-ss-links)
   - [Advanced Usage](#advanced-usage)
   - [Auto Upload](#auto-upload)
 
@@ -90,6 +91,20 @@ http://127.0.0.1:25500/sub?target=clash&url=https%3A%2F%2Fdler.cloud%2Fsubscribe
 
 Finally subscribe this link in Clash and you are done!
 ```
+
+### Dialer Node Parameter (SS Links)
+
+To mark a Shadowsocks node as a dialer node, append `x-sc-underlying-proxy=dialer` in the query part (before `#`).
+
+Examples:
+
+```txt
+ss://YWVzLTEyOC1nY206VGVzdFBhc3N3b3Jk@198.51.100.10:443/?x-sc-underlying-proxy=dialer#example-dialer
+
+ss://YWVzLTEyOC1nY206VGVzdFBhc3N3b3Jk@198.51.100.10:443/?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Dexample.com&x-sc-underlying-proxy=dialer#example-dialer
+```
+
+For backward compatibility, `underlying-proxy=dialer` is still supported.
 
 ---
 

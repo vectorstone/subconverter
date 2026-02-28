@@ -234,6 +234,7 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
     YAML::Node proxies, original_groups;
     std::vector<Proxy> nodelist;
     string_array remarks_list;
+    string_array dialer_nodes;
     /// proxies style
     bool proxy_block = false, proxy_compact = false, group_block = false, group_compact = false;
     switch(hash_(ext.clash_proxies_style))
@@ -292,6 +293,8 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
             singleproxy["password"] = x.Password;
             if(std::all_of(x.Password.begin(), x.Password.end(), ::isdigit) && !x.Password.empty())
                 singleproxy["password"].SetTag("str");
+            if(!x.UnderlyingProxy.empty())
+                singleproxy["dialer-proxy"] = x.UnderlyingProxy;
             switch(hash_(x.Plugin))
             {
             case "simple-obfs"_hash:
@@ -575,6 +578,8 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         proxies.push_back(singleproxy);
         remarks_list.emplace_back(x.Remark);
         nodelist.emplace_back(x);
+        if(!x.UnderlyingProxy.empty())
+            dialer_nodes.emplace_back(x.Remark);
     }
 
     if(proxy_compact)
@@ -635,6 +640,17 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         for(const auto& y : x.Proxies)
             groupGenerate(y, nodelist, filtered_nodelist, true, ext);
 
+        if(x.Name == "dialer")
+        {
+            filtered_nodelist.erase(
+                    std::remove_if(filtered_nodelist.begin(), filtered_nodelist.end(),
+                                   [&dialer_nodes](const std::string &remark)
+                                   {
+                                       return std::find(dialer_nodes.begin(), dialer_nodes.end(), remark) != dialer_nodes.end();
+                                   }),
+                    filtered_nodelist.end());
+        }
+
         if(!x.UsingProvider.empty())
             singlegroup["use"] = x.UsingProvider;
         else
@@ -665,6 +681,19 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
 
     if(group_compact)
         original_groups.SetStyle(YAML::EmitterStyle::Flow);
+
+    if(!dialer_nodes.empty())
+    {
+        YAML::Node dialer_group;
+        dialer_group["name"] = "📞 dialer节点";
+        dialer_group["type"] = "select";
+        dialer_group["proxies"] = dialer_nodes;
+        if(group_block)
+            dialer_group.SetStyle(YAML::EmitterStyle::Block);
+        else
+            dialer_group.SetStyle(YAML::EmitterStyle::Flow);
+        original_groups.push_back(dialer_group);
+    }
 
     if(ext.clash_new_field_name)
         yamlnode["proxy-groups"] = original_groups;
@@ -1074,7 +1103,7 @@ std::string proxyToSingle(std::vector<Proxy> &nodes, int types, extra_settings &
     for(Proxy &x : nodes)
     {
         std::string remark = x.Remark;
-        std::string &hostname = x.Hostname, &password = x.Password, &method = x.EncryptMethod, &plugin = x.Plugin, &pluginopts = x.PluginOption, &protocol = x.Protocol, &protoparam = x.ProtocolParam, &obfs = x.OBFS, &obfsparam = x.OBFSParam, &id = x.UserId, &transproto = x.TransferProtocol, &host = x.Host, &path = x.Path, &faketype = x.FakeType;
+        std::string &hostname = x.Hostname, &password = x.Password, &method = x.EncryptMethod, &plugin = x.Plugin, &pluginopts = x.PluginOption, &protocol = x.Protocol, &protoparam = x.ProtocolParam, &obfs = x.OBFS, &obfsparam = x.OBFSParam, &id = x.UserId, &transproto = x.TransferProtocol, &host = x.Host, &path = x.Path, &faketype = x.FakeType, &underlying_proxy = x.UnderlyingProxy;
         bool &tlssecure = x.TLSSecure;
         std::string port = std::to_string(x.Port);
         std::string aid = std::to_string(x.AlterId);
@@ -1085,9 +1114,17 @@ std::string proxyToSingle(std::vector<Proxy> &nodes, int types, extra_settings &
             if(ss)
             {
                 proxyStr = "ss://" + urlSafeBase64Encode(method + ":" + password) + "@" + hostname + ":" + port;
+                bool has_query = false;
                 if(!plugin.empty() && !pluginopts.empty())
                 {
                     proxyStr += "/?plugin=" + urlEncode(plugin + ";" + pluginopts);
+                    has_query = true;
+                }
+                if(!underlying_proxy.empty())
+                {
+                    proxyStr += has_query ? "&" : "/?";
+                    proxyStr += "x-sc-underlying-proxy=" + urlEncode(underlying_proxy);
+                    has_query = true;
                 }
                 proxyStr += "#" + urlEncode(remark);
             }
@@ -1241,7 +1278,7 @@ void proxyToQuan(std::vector<Proxy> &nodes, INIReader &ini, std::vector<RulesetC
 
         processRemark(x.Remark, remarks_list);
 
-        std::string &hostname = x.Hostname, &method = x.EncryptMethod, &password = x.Password, &id = x.UserId, &transproto = x.TransferProtocol, &host = x.Host, &path = x.Path, &edge = x.Edge, &protocol = x.Protocol, &protoparam = x.ProtocolParam, &obfs = x.OBFS, &obfsparam = x.OBFSParam, &plugin = x.Plugin, &pluginopts = x.PluginOption, &username = x.Username;
+        std::string &hostname = x.Hostname, &method = x.EncryptMethod, &password = x.Password, &id = x.UserId, &transproto = x.TransferProtocol, &host = x.Host, &path = x.Path, &edge = x.Edge, &protocol = x.Protocol, &protoparam = x.ProtocolParam, &obfs = x.OBFS, &obfsparam = x.OBFSParam, &plugin = x.Plugin, &pluginopts = x.PluginOption, &username = x.Username, &underlying_proxy = x.UnderlyingProxy;
         std::string port = std::to_string(x.Port);
         bool &tlssecure = x.TLSSecure;
         tribool scv;
@@ -1292,11 +1329,20 @@ void proxyToQuan(std::vector<Proxy> &nodes, INIReader &ini, std::vector<RulesetC
             if(ext.nodelist)
             {
                 proxyStr = "ss://" + urlSafeBase64Encode(method + ":" + password) + "@" + hostname + ":" + port;
+                bool has_query = false;
                 if(!plugin.empty() && !pluginopts.empty())
                 {
                     proxyStr += "/?plugin=" + urlEncode(plugin + ";" + pluginopts);
+                    has_query = true;
                 }
-                proxyStr += "&group=" + urlSafeBase64Encode(x.Group) + "#" + urlEncode(x.Remark);
+                if(!underlying_proxy.empty())
+                {
+                    proxyStr += has_query ? "&" : "/?";
+                    proxyStr += "x-sc-underlying-proxy=" + urlEncode(underlying_proxy);
+                    has_query = true;
+                }
+                proxyStr += has_query ? "&" : "/?";
+                proxyStr += "group=" + urlSafeBase64Encode(x.Group) + "#" + urlEncode(x.Remark);
             }
             else
             {
