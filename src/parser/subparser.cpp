@@ -470,7 +470,7 @@ void explodeVmessConf(std::string content, std::vector<Proxy> &nodes)
 
 void explodeSS(std::string ss, Proxy &node)
 {
-    std::string ps, password, method, server, port, plugins, plugin, pluginopts, addition, group = SS_DEFAULT_GROUP, secret;
+    std::string ps, password, method, server, port, plugins, plugin, pluginopts, addition, group = SS_DEFAULT_GROUP, secret, underlying_proxy;
     //std::vector<std::string> args, secret;
     ss = replaceAllDistinct(ss.substr(5), "/?", "?");
     if(strFind(ss, "#"))
@@ -490,6 +490,11 @@ void explodeSS(std::string ss, Proxy &node)
         group = getUrlArg(addition, "group");
         if(!group.empty())
             group = urlSafeBase64Decode(group);
+        underlying_proxy = urlDecode(getUrlArg(addition, "x-sc-underlying-proxy"));
+        if(underlying_proxy.empty())
+            underlying_proxy = urlDecode(getUrlArg(addition, "underlying-proxy"));
+        if(underlying_proxy.empty())
+            underlying_proxy = urlDecode(getUrlArg(addition, "underlying_proxy"));
         ss.erase(ss.find('?'));
     }
     if(strFind(ss, "@"))
@@ -509,7 +514,7 @@ void explodeSS(std::string ss, Proxy &node)
     if(ps.empty())
         ps = server + ":" + port;
 
-    ssConstruct(node, group, ps, server, port, password, method, plugin, pluginopts);
+    ssConstruct(node, group, ps, server, port, password, method, plugin, pluginopts, tribool(), tribool(), tribool(), tribool(), underlying_proxy);
 }
 
 void explodeSSD(std::string link, std::vector<Proxy> &nodes)
