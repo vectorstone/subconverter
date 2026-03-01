@@ -38,11 +38,12 @@ Utility to convert between various proxy subscription formats.
 | Surge 3      |     ✓      |      ✓       | surge&ver=3 |
 | Surge 4      |     ✓      |      ✓       | surge&ver=4 |
 | V2Ray        |     ✓      |      ✓       | v2ray       |
+| VLESS        |     ✓      |      ✓       | vless       |
 | Telegram-liked HTTP/Socks 5 links |     ✓      |      ×       | Only as source |
 
 Notice:
 
-1. Shadowrocket users should use `ss`, `ssr` or `v2ray` as target.
+1. Shadowrocket users should use `ss`, `ssr`, `v2ray` or `vless` as target.
 
 2. You can add `&remark=` to Telegram-liked HTTP/Socks 5 links to set a remark for this node. For example:
 

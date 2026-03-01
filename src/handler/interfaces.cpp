@@ -314,7 +314,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     bool lSimpleSubscription = false;
     switch(hash_(argTarget))
     {
-    case "ss"_hash: case "ssd"_hash: case "ssr"_hash: case "sssub"_hash: case "v2ray"_hash: case "trojan"_hash: case "mixed"_hash:
+    case "ss"_hash: case "ssd"_hash: case "ssr"_hash: case "sssub"_hash: case "v2ray"_hash: case "vless"_hash: case "trojan"_hash: case "mixed"_hash:
         lSimpleSubscription = true;
         break;
     case "clash"_hash: case "clashr"_hash: case "surge"_hash: case "quan"_hash: case "quanx"_hash: case "loon"_hash: case "surfboard"_hash: case "mellow"_hash: case "singbox"_hash:
@@ -869,6 +869,12 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         if(argUpload)
             uploadGist("v2ray", argUploadPath, output_content, false);
         break;
+    case "vless"_hash:
+        writeLog(0, "Generate target: vless", LOG_LEVEL_INFO);
+        output_content = proxyToSingle(nodes, 16, ext);
+        if(argUpload)
+            uploadGist("vless", argUploadPath, output_content, false);
+        break;
     case "trojan"_hash:
         writeLog(0, "Generate target: Trojan", LOG_LEVEL_INFO);
         output_content = proxyToSingle(nodes, 8, ext);
@@ -877,7 +883,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         break;
     case "mixed"_hash:
         writeLog(0, "Generate target: Standard Subscription", LOG_LEVEL_INFO);
-        output_content = proxyToSingle(nodes, 15, ext);
+        output_content = proxyToSingle(nodes, 31, ext);
         if(argUpload)
             uploadGist("sub", argUploadPath, output_content, false);
         break;
