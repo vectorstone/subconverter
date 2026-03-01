@@ -11,6 +11,14 @@
 
 ## 新增内容
 
+2026/3/1
+
+-   新增 `vless://` 节点解析能力，支持 Reality 参数（如 `security=reality`、`pbk`、`sid`、`fp`、`flow`）
+-   新增 VLESS 目标导出能力，支持 `clash`、`surge`、`quanx`、`singbox`、`vless` 及 `mixed`
+-   `mixed` 目标现在包含 VLESS 单链接输出
+-   本次发布代码提交：`f3e4e21`
+-   Docker 镜像已发布：`a823002162/subconvert:f3e4e21` 与 `a823002162/subconvert:latest`
+
 2026/2/27
 
 -   新增 SS 链接 dialer 参数说明（`x-sc-underlying-proxy`），并同步中英文文档

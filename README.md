@@ -12,6 +12,7 @@ Utility to convert between various proxy subscription formats.
 [中文文档](https://github.com/tindy2013/subconverter/blob/master/README-cn.md)
 
 - [subconverter](#subconverter)
+  - [What's New](#whats-new)
   - [Supported Types](#supported-types)
   - [Quick Usage](#quick-usage)
     - [Access Interface](#access-interface)
@@ -19,6 +20,16 @@ Utility to convert between various proxy subscription formats.
     - [Dialer Node Parameter (SS Links)](#dialer-node-parameter-ss-links)
   - [Advanced Usage](#advanced-usage)
   - [Auto Upload](#auto-upload)
+
+## What's New
+
+2026/03/01
+
+- Added VLESS and Reality parsing support for `vless://` links.
+- Added VLESS export support for `clash`, `surge`, `quanx`, `singbox`, `vless` and `mixed` targets.
+- Updated `mixed` target output to include VLESS links.
+- Release commit: `f3e4e21`.
+- Docker image published: `a823002162/subconvert:f3e4e21` and `a823002162/subconvert:latest`.
 
 ## Supported Types
 
