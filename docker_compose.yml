@@ -1,0 +1,10 @@
+---
+version: "3"
+services:
+    subconverter:
+        # pinned digest (built from commit f3e4e21, released 2026-03-01)
+        image: a823002162/subconvert@sha256:b04c997f78751b5d8a2fae982bcf32b2701bfe4391beeae2aedc3631e9bd3bc7
+        container_name: subconvert
+        ports:
+            - "15051:25500"
+        restart: always
