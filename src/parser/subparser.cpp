@@ -25,12 +25,23 @@ std::string modSSMD5 = "f7653207090ce3389115e9c88541afe0";
 
 //remake from speedtestutil
 
+static std::string normalizeHostnameForNode(const std::string &hostname)
+{
+    if(hostname.size() > 2 && hostname.front() == '[' && hostname.back() == ']')
+    {
+        const std::string ipv6 = hostname.substr(1, hostname.size() - 2);
+        if(isIPv6(ipv6))
+            return ipv6;
+    }
+    return hostname;
+}
+
 void commonConstruct(Proxy &node, ProxyType type, const std::string &group, const std::string &remarks, const std::string &server, const std::string &port, const tribool &udp, const tribool &tfo, const tribool &scv, const tribool &tls13,  const std::string& underlying_proxy)
 {
     node.Type = type;
     node.Group = group;
     node.Remark = remarks;
-    node.Hostname = server;
+    node.Hostname = normalizeHostnameForNode(server);
     node.UnderlyingProxy = underlying_proxy;
     node.Port = to_int(port);
     node.UDP = udp;
@@ -56,7 +67,7 @@ void vmessConstruct(Proxy &node, const std::string &group, const std::string &re
     }
     else
     {
-        node.Host = (host.empty() && !isIPv4(add) && !isIPv6(add)) ? add.data() : trim(host);
+        node.Host = (host.empty() && !isIPv4(node.Hostname) && !isIPv6(node.Hostname)) ? node.Hostname : trim(host);
         node.Path = path.empty() ? "/" : trim(path);
     }
     node.FakeType = type;
@@ -95,7 +106,7 @@ void vlessConstruct(Proxy &node, const std::string &group, const std::string &re
     }
     else
     {
-        node.Host = (host.empty() && !isIPv4(add) && !isIPv6(add)) ? add.data() : trim(host);
+        node.Host = (host.empty() && !isIPv4(node.Hostname) && !isIPv6(node.Hostname)) ? node.Hostname : trim(host);
         node.Path = path.empty() ? "/" : urlDecode(trim(path));
     }
 }

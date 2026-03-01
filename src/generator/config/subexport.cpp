@@ -403,6 +403,7 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
             switch(hash_(x.TransferProtocol))
             {
             case "tcp"_hash:
+                singleproxy["network"] = x.TransferProtocol;
                 break;
             case "ws"_hash:
                 singleproxy["network"] = x.TransferProtocol;
