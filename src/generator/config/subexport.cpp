@@ -29,6 +29,64 @@ extern string_array ss_ciphers, ssr_ciphers;
 const string_array clashr_protocols = {"origin", "auth_sha1_v4", "auth_aes128_md5", "auth_aes128_sha1", "auth_chain_a", "auth_chain_b"};
 const string_array clashr_obfs = {"plain", "http_simple", "http_post", "random_head", "tls1.2_ticket_auth", "tls1.2_ticket_fastauth"};
 const string_array clash_ssr_ciphers = {"rc4-md5", "aes-128-ctr", "aes-192-ctr", "aes-256-ctr", "aes-128-cfb", "aes-192-cfb", "aes-256-cfb", "chacha20-ietf", "xchacha20", "none"};
+constexpr const char *dialer_group_name = "📞 dialer节点";
+
+static bool isDialerGroup(const std::string &group_name)
+{
+    return group_name == "dialer" || group_name == dialer_group_name;
+}
+
+static bool clashRuleTargetDialer(const std::string &rule)
+{
+    std::string normalized_rule = trimWhitespace(rule, true, true);
+    string_view_array rule_parts;
+    split(rule_parts, normalized_rule, ',');
+    if(rule_parts.empty())
+        return false;
+
+    const std::string rule_type = trim(std::string(rule_parts[0]));
+    const size_t policy_index = (rule_type == "MATCH" || rule_type == "FINAL") ? 1 : 2;
+    if(rule_parts.size() <= policy_index)
+        return false;
+
+    return trim(std::string(rule_parts[policy_index])) == dialer_group_name;
+}
+
+static void removeClashDialerRules(YAML::Node &yamlnode)
+{
+    for(const auto &field_name : {"rules", "Rule"})
+    {
+        YAML::Node rules = yamlnode[field_name];
+        if(!rules.IsDefined() || !rules.IsSequence())
+            continue;
+
+        YAML::Node filtered_rules(YAML::NodeType::Sequence);
+        for(const auto &rule : rules)
+        {
+            std::string rule_content = safe_as<std::string>(rule);
+            if(clashRuleTargetDialer(rule_content))
+                continue;
+            filtered_rules.push_back(rule_content);
+        }
+        yamlnode[field_name] = filtered_rules;
+    }
+}
+
+static bool clashHasDialerNodes(const YAML::Node &yamlnode, bool clash_new_field_name)
+{
+    const std::string proxy_field_name = clash_new_field_name ? "proxies" : "Proxy";
+    YAML::Node proxies = yamlnode[proxy_field_name];
+    if(!proxies.IsDefined() || !proxies.IsSequence())
+        return false;
+
+    for(const auto &proxy : proxies)
+    {
+        if(!safe_as<std::string>(proxy["dialer-proxy"]).empty())
+            return true;
+    }
+
+    return false;
+}
 
 std::string vmessLinkConstruct(const std::string &remarks, const std::string &add, const std::string &port, const std::string &type, const std::string &id, const std::string &aid, const std::string &net, const std::string &path, const std::string &host, const std::string &tls)
 {
@@ -673,9 +731,13 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
     else
         yamlnode["Proxy"] = proxies;
 
+    const bool has_dialer_nodes = !dialer_nodes.empty();
 
     for(const ProxyGroupConfig &x : extra_proxy_group)
     {
+        if(!has_dialer_nodes && isDialerGroup(x.Name))
+            continue;
+
         YAML::Node singlegroup;
         string_array filtered_nodelist;
 
@@ -757,10 +819,10 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
     if(group_compact)
         original_groups.SetStyle(YAML::EmitterStyle::Flow);
 
-    if(!dialer_nodes.empty())
+    if(has_dialer_nodes)
     {
         YAML::Node dialer_group;
-        dialer_group["name"] = "📞 dialer节点";
+        dialer_group["name"] = dialer_group_name;
         dialer_group["type"] = "select";
         dialer_group["proxies"] = dialer_nodes;
         if(group_block)
@@ -791,6 +853,18 @@ std::string proxyToClash(std::vector<Proxy> &nodes, const std::string &base_conf
     }
 
     proxyToClash(nodes, yamlnode, extra_proxy_group, clashR, ext);
+
+    if(!clashHasDialerNodes(yamlnode, ext.clash_new_field_name))
+    {
+        ruleset_content_array.erase(
+                std::remove_if(ruleset_content_array.begin(), ruleset_content_array.end(),
+                               [](const RulesetContent &ruleset)
+                               {
+                                   return ruleset.rule_group == dialer_group_name;
+                               }),
+                ruleset_content_array.end());
+        removeClashDialerRules(yamlnode);
+    }
 
     if(ext.nodelist)
         return YAML::Dump(yamlnode);
