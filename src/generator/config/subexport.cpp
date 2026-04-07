@@ -824,7 +824,11 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         YAML::Node dialer_group;
         dialer_group["name"] = dialer_group_name;
         dialer_group["type"] = "select";
-        dialer_group["proxies"] = dialer_nodes;
+        YAML::Node dialer_proxies(YAML::NodeType::Sequence);
+        dialer_proxies.push_back("DIRECT");
+        for(const auto &node : dialer_nodes)
+            dialer_proxies.push_back(node);
+        dialer_group["proxies"] = dialer_proxies;
         if(group_block)
             dialer_group.SetStyle(YAML::EmitterStyle::Block);
         else
