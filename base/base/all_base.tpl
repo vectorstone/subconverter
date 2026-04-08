@@ -6,10 +6,41 @@ allow-lan: {{ default(global.clash.allow_lan, "true") }}
 mode: Rule
 log-level: {{ default(global.clash.log_level, "info") }}
 external-controller: {{ default(global.clash.external_controller, "127.0.0.1:9090") }}
-{% if default(request.clash.dns, "") == "1" %}
+{% if default(global.clash.dns.enable, "false") == "true" %}
 dns:
   enable: true
-  listen: :1053
+  enhanced-mode: {{ default(global.clash.dns.enhanced_mode, "fake-ip") }}
+  fake-ip-range: {{ default(global.clash.dns.fake_ip_range, "198.18.0.1/16") }}
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+  fallback:
+    - tls://8.8.4.4:853
+    - https://dns.cloudflare.com/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    ipcidr:
+      - 240.0.0.0/4
+      - 0.0.0.0/32
+  fake-ip-filter:
+    - '*.lan'
+    - '*.localdomain'
+    - '*.local'
+    - '*.localhost'
+    - '*.home.arpa'
+    - '+.pool.ntp.org'
+    - 'time.*.com'
+    - 'ntp.*.com'
+    - '*.msftconnecttest.com'
+    - '*.msftncsi.com'
+    - 'stun.*.*'
+    - '+.stun.*.*'
 {% endif %}
 {% if local.clash.new_field_name == "true" %}
 proxies: ~
