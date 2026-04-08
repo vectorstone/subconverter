@@ -249,6 +249,18 @@ key = "clash.external_controller"
 value = "127.0.0.1:9090"
 
 [[template.globals]]
+key = "clash.dns.enable"
+value = "true"
+
+[[template.globals]]
+key = "clash.dns.enhanced_mode"
+value = "fake-ip"
+
+[[template.globals]]
+key = "clash.dns.fake_ip_range"
+value = "198.18.0.1/16"
+
+[[template.globals]]
 key = "singbox.allow_lan"
 value = "true"
 
