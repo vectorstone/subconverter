@@ -29,11 +29,12 @@ extern string_array ss_ciphers, ssr_ciphers;
 const string_array clashr_protocols = {"origin", "auth_sha1_v4", "auth_aes128_md5", "auth_aes128_sha1", "auth_chain_a", "auth_chain_b"};
 const string_array clashr_obfs = {"plain", "http_simple", "http_post", "random_head", "tls1.2_ticket_auth", "tls1.2_ticket_fastauth"};
 const string_array clash_ssr_ciphers = {"rc4-md5", "aes-128-ctr", "aes-192-ctr", "aes-256-ctr", "aes-128-cfb", "aes-192-cfb", "aes-256-cfb", "chacha20-ietf", "xchacha20", "none"};
-constexpr const char *dialer_group_name = "📞 dialer节点";
+constexpr const char *chain_entry_group_name = "ChainProxyEntry";
+constexpr const char *dialer_group_name = "ChainProxyExit";
 
 static bool isDialerGroup(const std::string &group_name)
 {
-    return group_name == "dialer" || group_name == dialer_group_name;
+    return group_name == chain_entry_group_name || group_name == dialer_group_name;
 }
 
 static bool clashRuleTargetDialer(const std::string &rule)
@@ -353,7 +354,7 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
             if(std::all_of(x.Password.begin(), x.Password.end(), ::isdigit) && !x.Password.empty())
                 singleproxy["password"].SetTag("str");
             if(!x.UnderlyingProxy.empty())
-                singleproxy["dialer-proxy"] = x.UnderlyingProxy;
+                singleproxy["dialer-proxy"] = chain_entry_group_name;
             switch(hash_(x.Plugin))
             {
             case "simple-obfs"_hash:
@@ -777,7 +778,7 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         for(const auto& y : x.Proxies)
             groupGenerate(y, nodelist, filtered_nodelist, true, ext);
 
-        if(x.Name == "dialer" || x.Type == ProxyGroupType::URLTest)
+        if(x.Name == chain_entry_group_name || x.Type == ProxyGroupType::URLTest)
         {
             filtered_nodelist.erase(
                     std::remove_if(filtered_nodelist.begin(), filtered_nodelist.end(),
@@ -823,11 +824,9 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
     {
         YAML::Node dialer_group;
         dialer_group["name"] = dialer_group_name;
-        dialer_group["type"] = "url-test";
-        dialer_group["url"] = "http://www.gstatic.com/generate_204";
-        dialer_group["interval"] = 300;
-        dialer_group["tolerance"] = 50;
+        dialer_group["type"] = "select";
         YAML::Node dialer_proxies(YAML::NodeType::Sequence);
+        dialer_proxies.push_back("DIRECT");
         for(const auto &node : dialer_nodes)
             dialer_proxies.push_back(node);
         dialer_group["proxies"] = dialer_proxies;
