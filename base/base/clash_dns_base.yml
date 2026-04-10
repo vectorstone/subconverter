@@ -34,6 +34,7 @@ dns:
     - '+.owolist.cn'
     - '+.bbkss.org'
     - '+.yangliq.com'
+    - '+.qinyues4.cc'
     - '+.pool.ntp.org'
     - 'time.*.com'
     - 'ntp.*.com'
@@ -48,6 +49,13 @@ dns:
     +.bbkss.org:
       - 223.5.5.5
       - 119.29.29.29
+    +.qinyues4.cc:
+      - 223.5.5.5
+      - 119.29.29.29
+profile:
+  store-selected: true
+  store-fake-ip: true
+  tracing: true
 proxies: ~
 proxy-groups: ~
 rules: ~

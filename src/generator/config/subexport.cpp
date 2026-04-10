@@ -777,7 +777,7 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
         for(const auto& y : x.Proxies)
             groupGenerate(y, nodelist, filtered_nodelist, true, ext);
 
-        if(x.Name == "dialer")
+        if(x.Name == "dialer" || x.Type == ProxyGroupType::URLTest)
         {
             filtered_nodelist.erase(
                     std::remove_if(filtered_nodelist.begin(), filtered_nodelist.end(),
@@ -823,9 +823,11 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
     {
         YAML::Node dialer_group;
         dialer_group["name"] = dialer_group_name;
-        dialer_group["type"] = "select";
+        dialer_group["type"] = "url-test";
+        dialer_group["url"] = "http://www.gstatic.com/generate_204";
+        dialer_group["interval"] = 300;
+        dialer_group["tolerance"] = 50;
         YAML::Node dialer_proxies(YAML::NodeType::Sequence);
-        dialer_proxies.push_back("DIRECT");
         for(const auto &node : dialer_nodes)
             dialer_proxies.push_back(node);
         dialer_group["proxies"] = dialer_proxies;
