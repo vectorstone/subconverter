@@ -547,6 +547,12 @@ void readYAMLConf(YAML::Node &node)
         node["advanced"]["max_allowed_rulesets"] >> global.maxAllowedRulesets;
         node["advanced"]["max_allowed_rules"] >> global.maxAllowedRules;
         node["advanced"]["max_allowed_download_size"] >> global.maxAllowedDownloadSize;
+        node["advanced"]["fetch_timeout"] >> global.fetchTimeout;
+        node["advanced"]["fetch_connect_timeout"] >> global.fetchConnectTimeout;
+        node["advanced"]["fetch_retry_count"] >> global.fetchRetryCount;
+        node["advanced"]["fetch_retry_backoff"] >> global.fetchRetryBackoff;
+        node["advanced"]["prefer_ipv4"] >> global.preferIPv4;
+        node["advanced"]["max_parallel_subscription_fetch"] >> global.maxParallelSubscriptionFetch;
         if(node["advanced"]["enable_cache"].IsDefined())
         {
             if(safe_as<bool>(node["advanced"]["enable_cache"]))
@@ -734,10 +740,17 @@ void readTOMLConf(toml::value &root)
                   "max_allowed_rulesets", global.maxAllowedRulesets,
                   "max_allowed_rules", global.maxAllowedRules,
                   "max_allowed_download_size", global.maxAllowedDownloadSize,
+                  "fetch_timeout", global.fetchTimeout,
+                  "fetch_connect_timeout", global.fetchConnectTimeout,
+                  "fetch_retry_count", global.fetchRetryCount,
+                  "fetch_retry_backoff", global.fetchRetryBackoff,
+                  "prefer_ipv4", global.preferIPv4,
+                  "max_parallel_subscription_fetch", global.maxParallelSubscriptionFetch,
                   "enable_cache", enable_cache,
                   "cache_subscription", cache_subscription,
                   "cache_config", cache_config,
                   "cache_ruleset", cache_ruleset,
+                  "serve_cache_on_fetch_fail", global.serveCacheOnFetchFail,
                   "script_clean_context", global.scriptCleanContext,
                   "async_fetch_ruleset", global.asyncFetchRuleset,
                   "skip_failed_links", global.skipFailedLinks
@@ -778,6 +791,7 @@ void readTOMLConf(toml::value &root)
     else
     {
         global.cacheSubscription = global.cacheConfig = global.cacheRuleset = 0;
+        global.serveCacheOnFetchFail = false;
     }
 
     writeLog(0, "Load preference settings in TOML format completed.", LOG_LEVEL_INFO);
@@ -1052,6 +1066,12 @@ void readConf()
     ini.get_number_if_exist("max_allowed_rulesets", global.maxAllowedRulesets);
     ini.get_number_if_exist("max_allowed_rules", global.maxAllowedRules);
     ini.get_number_if_exist("max_allowed_download_size", global.maxAllowedDownloadSize);
+    ini.get_int_if_exist("fetch_timeout", global.fetchTimeout);
+    ini.get_int_if_exist("fetch_connect_timeout", global.fetchConnectTimeout);
+    ini.get_int_if_exist("fetch_retry_count", global.fetchRetryCount);
+    ini.get_int_if_exist("fetch_retry_backoff", global.fetchRetryBackoff);
+    ini.get_bool_if_exist("prefer_ipv4", global.preferIPv4);
+    ini.get_int_if_exist("max_parallel_subscription_fetch", global.maxParallelSubscriptionFetch);
     if(ini.item_exist("enable_cache"))
     {
         if(ini.get_bool("enable_cache"))

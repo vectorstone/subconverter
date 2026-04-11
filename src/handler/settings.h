@@ -61,6 +61,9 @@ struct Settings
     //cache system
     bool serveCacheOnFetchFail = false;
     int cacheSubscription = 60, cacheConfig = 300, cacheRuleset = 21600;
+    int fetchTimeout = 15, fetchConnectTimeout = 0, fetchRetryCount = 1, fetchRetryBackoff = 0;
+    int maxParallelSubscriptionFetch = 0;
+    bool preferIPv4 = false;
 
     //limits
     size_t maxAllowedRulesets = 64, maxAllowedRules = 32768;
