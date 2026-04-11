@@ -1,6 +1,8 @@
 #include <iostream>
 #include <string>
 #include <mutex>
+#include <algorithm>
+#include <future>
 #include <numeric>
 
 #include <yaml-cpp/yaml.h>
@@ -13,6 +15,7 @@
 #include "script/script_quickjs.h"
 #include "server/webserver.h"
 #include "utils/base64/base64.h"
+#include "utils/defer.h"
 #include "utils/file_extra.h"
 #include "utils/ini_reader/ini_reader.h"
 #include "utils/logger.h"
@@ -32,6 +35,86 @@
 extern WebServer webServer;
 
 string_array gRegexBlacklist = {"(.*)*"};
+
+struct NodeFetchResult
+{
+    std::string link;
+    std::string sub_info;
+    std::vector<Proxy> nodes;
+    int ret = 0;
+};
+
+static NodeFetchResult fetchNodesForLink(const std::string &link, int groupID, const parse_settings &base_parse_set)
+{
+    NodeFetchResult result;
+    result.link = link;
+
+    parse_settings local_parse_set = base_parse_set;
+    local_parse_set.sub_info = &result.sub_info;
+#ifndef NO_JS_RUNTIME
+    qjs::Runtime *runtime = nullptr;
+    qjs::Context *context = nullptr;
+    if(local_parse_set.authorized && !global.scriptCleanContext)
+    {
+        runtime = new qjs::Runtime();
+        script_runtime_init(*runtime);
+        context = new qjs::Context(*runtime);
+        script_context_init(*context);
+    }
+    defer(delete context; delete runtime;);
+    local_parse_set.js_runtime = runtime;
+    local_parse_set.js_context = context;
+#endif // NO_JS_RUNTIME
+
+    result.ret = addNodes(result.link, result.nodes, groupID, local_parse_set);
+    return result;
+}
+
+static int fetchNodeBatch(const string_array &urls, int initial_group_id, std::vector<Proxy> &all_nodes, std::string &sub_info, parse_settings &parse_set, int *status_code, std::string *failed_link = nullptr)
+{
+    if(urls.empty())
+        return 0;
+
+    const std::size_t parallel_limit = global.maxParallelSubscriptionFetch > 1 ? static_cast<std::size_t>(global.maxParallelSubscriptionFetch) : 1U;
+    for(std::size_t batch_begin = 0; batch_begin < urls.size(); batch_begin += parallel_limit)
+    {
+        const std::size_t batch_end = std::min(batch_begin + parallel_limit, urls.size());
+        std::vector<std::future<NodeFetchResult>> tasks;
+        tasks.reserve(batch_end - batch_begin);
+        for(std::size_t idx = batch_begin; idx < batch_end; idx++)
+        {
+            const int groupID = initial_group_id >= 0 ? initial_group_id + static_cast<int>(idx) : initial_group_id - static_cast<int>(idx);
+            tasks.emplace_back(std::async(std::launch::async, [&, idx, groupID]()
+            {
+                return fetchNodesForLink(urls[idx], groupID, parse_set);
+            }));
+        }
+
+        for(auto &task : tasks)
+        {
+            NodeFetchResult fetched = task.get();
+            if(fetched.ret == -1)
+            {
+                if(global.skipFailedLinks)
+                    writeLog(0, "The following link doesn't contain any valid node info: " + fetched.link, LOG_LEVEL_WARNING);
+                else
+                {
+                    *status_code = 400;
+                    if(failed_link)
+                        *failed_link = fetched.link;
+                    return -1;
+                }
+            }
+            else
+            {
+                if(!fetched.sub_info.empty())
+                    sub_info = fetched.sub_info;
+                std::move(fetched.nodes.begin(), fetched.nodes.end(), std::back_inserter(all_nodes));
+            }
+        }
+    }
+    return 0;
+}
 
 std::string parseProxy(const std::string &source)
 {
@@ -620,11 +703,61 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         // Remove empty urls
         urls.erase(std::remove_if(urls.begin(), urls.end(), [](const std::string& str) { return str.empty(); }), urls.end());
         importItems(urls, true);
+        if(urls.size() > 1 && global.maxParallelSubscriptionFetch > 1)
+        {
+            std::string failed_link;
+            for(std::string &x : urls)
+            {
+                x = regTrim(x);
+                writeLog(0, "Queueing node data fetch for url '" + x + "'.", LOG_LEVEL_INFO);
+            }
+            if(fetchNodeBatch(urls, groupID, insert_nodes, subInfo, parse_set, status_code, &failed_link) == -1)
+                return "The following link doesn't contain any valid node info: " + failed_link;
+        }
+        else
+        {
+            for(std::string &x : urls)
+            {
+                x = regTrim(x);
+                writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
+                if(addNodes(x, insert_nodes, groupID, parse_set) == -1)
+                {
+                    if(global.skipFailedLinks)
+                        writeLog(0, "The following link doesn't contain any valid node info: " + x, LOG_LEVEL_WARNING);
+                    else
+                    {
+                        *status_code = 400;
+                        return "The following link doesn't contain any valid node info: " + x;
+                    }
+                }
+                groupID--;
+            }
+        }
+    }
+    urls = split(argUrl, "|");
+    // Remove empty urls
+    urls.erase(std::remove_if(urls.begin(), urls.end(), [](const std::string& str) { return str.empty(); }), urls.end());
+    importItems(urls, true);
+    groupID = 0;
+    if(urls.size() > 1 && global.maxParallelSubscriptionFetch > 1)
+    {
+        std::string failed_link;
         for(std::string &x : urls)
         {
             x = regTrim(x);
+            writeLog(0, "Queueing node data fetch for url '" + x + "'.", LOG_LEVEL_INFO);
+        }
+        if(fetchNodeBatch(urls, groupID, nodes, subInfo, parse_set, status_code, &failed_link) == -1)
+            return "The following link doesn't contain any valid node info: " + failed_link;
+    }
+    else
+    {
+        for(std::string &x : urls)
+        {
+            x = regTrim(x);
+            //std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
             writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
-            if(addNodes(x, insert_nodes, groupID, parse_set) == -1)
+            if(addNodes(x, nodes, groupID, parse_set) == -1)
             {
                 if(global.skipFailedLinks)
                     writeLog(0, "The following link doesn't contain any valid node info: " + x, LOG_LEVEL_WARNING);
@@ -634,30 +767,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
                     return "The following link doesn't contain any valid node info: " + x;
                 }
             }
-            groupID--;
+            groupID++;
         }
-    }
-    urls = split(argUrl, "|");
-    // Remove empty urls
-    urls.erase(std::remove_if(urls.begin(), urls.end(), [](const std::string& str) { return str.empty(); }), urls.end());
-    importItems(urls, true);
-    groupID = 0;
-    for(std::string &x : urls)
-    {
-        x = regTrim(x);
-        //std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
-        writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
-        if(addNodes(x, nodes, groupID, parse_set) == -1)
-        {
-            if(global.skipFailedLinks)
-                writeLog(0, "The following link doesn't contain any valid node info: " + x, LOG_LEVEL_WARNING);
-            else
-            {
-                *status_code = 400;
-                return "The following link doesn't contain any valid node info: " + x;
-            }
-        }
-        groupID++;
     }
     //exit if found nothing
     if(nodes.empty() && insert_nodes.empty())

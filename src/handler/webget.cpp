@@ -2,6 +2,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 //#include <mutex>
+#include <algorithm>
+#include <chrono>
 #include <thread>
 #include <atomic>
 
@@ -120,6 +122,21 @@ static int logger(CURL *handle, curl_infotype type, char *data, size_t size, voi
     return 0;
 }
 
+static inline void clear_fetch_result(FetchResult &result)
+{
+    if(result.content)
+        result.content->clear();
+    if(result.response_headers)
+        result.response_headers->clear();
+    if(result.cookies)
+        result.cookies->clear();
+}
+
+static inline bool should_retry_fetch(CURLcode ret_code, long status_code)
+{
+    return ret_code != CURLE_OK || status_code == 0 || status_code >= 500;
+}
+
 static inline void curl_set_common_options(CURL *curl_handle, const char *url, curl_progress_data *data)
 {
     curl_easy_setopt(curl_handle, CURLOPT_URL, url);
@@ -131,7 +148,12 @@ static inline void curl_set_common_options(CURL *curl_handle, const char *url, c
     curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 20L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 15L);
+    if(global.fetchTimeout > 0)
+        curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, global.fetchTimeout);
+    if(global.fetchConnectTimeout > 0)
+        curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, global.fetchConnectTimeout);
+    if(global.preferIPv4)
+        curl_easy_setopt(curl_handle, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
     curl_easy_setopt(curl_handle, CURLOPT_COOKIEFILE, "");
     if(data)
     {
@@ -149,7 +171,8 @@ static int curlGet(const FetchArgument &argument, FetchResult &result)
     std::string *data = result.content, new_url = argument.url;
     curl_slist *header_list = nullptr;
     defer(curl_slist_free_all(header_list);)
-    long retVal;
+    CURLcode retVal = CURLE_OK;
+    long code = 0;
 
     curl_init();
 
@@ -230,18 +253,28 @@ static int curlGet(const FetchArgument &argument, FetchResult &result)
         break;
     }
 
-    unsigned int fail_count = 0, max_fails = 1;
-    while(true)
+    const auto start_time = std::chrono::steady_clock::now();
+    const unsigned int max_attempts = global.APIMode ? 1U : static_cast<unsigned int>(std::max(global.fetchRetryCount, 0) + 1);
+    unsigned int attempt = 0;
+    while(attempt < max_attempts)
     {
+        if(attempt > 0)
+        {
+            clear_fetch_result(result);
+            if(argument.cookies)
+                curl_easy_setopt(curl_handle, CURLOPT_COOKIELIST, "ALL");
+        }
         retVal = curl_easy_perform(curl_handle);
-        if(retVal == CURLE_OK || max_fails <= fail_count || global.APIMode)
+        code = 0;
+        curl_easy_getinfo(curl_handle, CURLINFO_HTTP_CODE, &code);
+        if(!should_retry_fetch(retVal, code) || attempt + 1 >= max_attempts)
             break;
-        else
-            fail_count++;
+        writeLog(0, "Fetch attempt " + std::to_string(attempt + 1) + " for '" + argument.url + "' failed with curl=" + std::to_string(retVal) + " http=" + std::to_string(code) + ", retrying.", LOG_LEVEL_DEBUG);
+        if(global.fetchRetryBackoff > 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(global.fetchRetryBackoff * (attempt + 1)));
+        attempt++;
     }
 
-    long code = 0;
-    curl_easy_getinfo(curl_handle, CURLINFO_HTTP_CODE, &code);
     *result.status_code = code;
 
     if(result.cookies)
@@ -269,6 +302,9 @@ static int curlGet(const FetchArgument &argument, FetchResult &result)
             data->clear();
         data->shrink_to_fit();
     }
+
+    const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
+    writeLog(0, "Fetch '" + argument.url + "' completed in " + std::to_string(duration_ms) + "ms with http=" + std::to_string(code) + ", curl=" + std::to_string(retVal) + ", attempts=" + std::to_string(attempt + 1) + ".", LOG_LEVEL_DEBUG);
 
     return *result.status_code;
 }
