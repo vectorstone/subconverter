@@ -5,3 +5,4 @@ cmake-build-debug
 base/cache
 build
 temp/
+.omx/

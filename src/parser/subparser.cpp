@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <string>
 #include <map>
 
@@ -296,6 +297,39 @@ void hysteria2Construct(
     node.CaStr = caStr;
     node.CWND = to_int(cwnd);
     node.HopInterval = to_int(hop_interval);
+}
+
+void tuicConstruct(
+    Proxy &node,
+    const std::string &group,
+    const std::string &remarks,
+    const std::string &server,
+    const std::string &port,
+    const std::string &uuid,
+    const std::string &password,
+    const std::string &sni,
+    const std::string &alpn,
+    const std::string &congestion_control,
+    tribool udp,
+    tribool tfo,
+    tribool scv,
+    const std::string &underlying_proxy
+)
+{
+    commonConstruct(node, ProxyType::TUIC, group, remarks, server, port, udp, tfo, scv, tribool(), underlying_proxy);
+    node.TLSSecure = true;
+    node.UserId = uuid;
+    node.Password = password;
+    node.SNI = sni;
+    node.ServerName = sni;
+    node.CongestionController = congestion_control;
+    if(!alpn.empty())
+    {
+        node.Alpn = split(alpn, ",");
+        for(std::string &item : node.Alpn)
+            item = trim(item);
+        node.Alpn.erase(std::remove_if(node.Alpn.begin(), node.Alpn.end(), [](const std::string &item){ return item.empty(); }), node.Alpn.end());
+    }
 }
 
 void explodeVmess(std::string vmess, Proxy &node)
@@ -1782,6 +1816,62 @@ void explodeHysteria2(std::string hysteria2, Proxy &node) {
     }
 }
 
+void explodeTUIC(std::string tuic, Proxy &node)
+{
+    std::string uuid, password, add, port, addition, remarks, auth, sni, alpn, congestion_control;
+    tribool scv, tfo, udp;
+    const std::string uuid_matcher = R"(^[\da-fA-F]{8}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{4}-[\da-fA-F]{12}$)";
+
+    tuic.erase(0, 7);
+
+    string_size pos = tuic.rfind('#');
+    if(pos != tuic.npos)
+    {
+        remarks = urlDecode(tuic.substr(pos + 1));
+        tuic.erase(pos);
+    }
+
+    pos = tuic.rfind('?');
+    if(pos != tuic.npos)
+    {
+        addition = tuic.substr(pos + 1);
+        tuic.erase(pos);
+    }
+
+    pos = tuic.rfind('@');
+    if(pos == tuic.npos)
+        return;
+    auth = urlDecode(tuic.substr(0, pos));
+    tuic.erase(0, pos + 1);
+
+    pos = auth.find(':');
+    if(pos == auth.npos)
+        return;
+    uuid = trim(auth.substr(0, pos));
+    password = trim(auth.substr(pos + 1));
+    if(uuid.empty() || password.empty() || !regMatch(uuid, uuid_matcher))
+        return;
+
+    if(regGetMatch(tuic, R"(^\[?([\d\-a-zA-Z:.]+)\]?:(\d+)$)", 3, 0, &add, &port))
+        return;
+
+    sni = urlDecode(getUrlArg(addition, "sni"));
+    alpn = urlDecode(getUrlArg(addition, "alpn"));
+    congestion_control = getUrlArg(addition, "congestion_control");
+    if(congestion_control.empty())
+        congestion_control = getUrlArg(addition, "congestion-controller");
+    scv = getUrlArg(addition, "allow_insecure");
+    if(scv.is_undef())
+        scv = getUrlArg(addition, "skip-cert-verify");
+    tfo = getUrlArg(addition, "tfo");
+    udp = getUrlArg(addition, "udp");
+
+    if(remarks.empty())
+        remarks = add + ":" + port;
+
+    tuicConstruct(node, TUIC_DEFAULT_GROUP, remarks, add, port, uuid, password, sni, alpn, congestion_control, udp, tfo, scv, "");
+}
+
 // peer = (public-key = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=, allowed-ips = "0.0.0.0/0, ::/0", endpoint = engage.cloudflareclient.com:2408, client-id = 139/184/125),(public-key = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=, endpoint = engage.cloudflareclient.com:2408)
 void parsePeers(Proxy &node, const std::string &data)
 {
@@ -2679,6 +2769,8 @@ void explode(const std::string &link, Proxy &node)
         explodeTrojan(link, node);
     else if(startsWith(link, "vless://") || startsWith(link, "vless1://"))
         explodeVless(link, node);
+    else if(startsWith(link, "tuic://"))
+        explodeTUIC(link, node);
     else if (strFind(link, "hysteria2://") || strFind(link, "hy2://"))
         explodeHysteria2(link, node);
     else if(isLink(link))

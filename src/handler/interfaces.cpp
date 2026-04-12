@@ -35,6 +35,7 @@
 extern WebServer webServer;
 
 string_array gRegexBlacklist = {"(.*)*"};
+constexpr const char *default_clash_external_config_path = "config/default_clash_chainproxy.ini";
 
 struct NodeFetchResult
 {
@@ -525,7 +526,12 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
 
     /// load external configuration
     if(argExternalConfig.empty())
-        argExternalConfig = global.defaultExtConfig;
+    {
+        if(!global.defaultExtConfig.empty())
+            argExternalConfig = global.defaultExtConfig;
+        else if(argTarget == "clash")
+            argExternalConfig = default_clash_external_config_path;
+    }
     if(!argExternalConfig.empty())
     {
         //std::cerr<<"External configuration file provided. Loading...\n";
