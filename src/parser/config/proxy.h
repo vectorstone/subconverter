@@ -23,7 +23,8 @@ enum class ProxyType
     SOCKS5,
     WireGuard,
     Hysteria,
-    Hysteria2
+    Hysteria2,
+    TUIC
 };
 
 inline String getProxyTypeName(ProxyType type)
@@ -54,6 +55,8 @@ inline String getProxyTypeName(ProxyType type)
         return "Hysteria";
     case ProxyType::Hysteria2:
         return "Hysteria2";
+    case ProxyType::TUIC:
+        return "TUIC";
     default:
         return "Unknown";
     }
@@ -127,6 +130,7 @@ struct Proxy
     String AuthStr;
     String SNI;
     String Fingerprint;
+    String CongestionController;
     String Ca;
     String CaStr;
     uint32_t RecvWindowConn;
@@ -149,5 +153,6 @@ struct Proxy
 #define XRAY_DEFAULT_GROUP "XRayProvider"
 #define HYSTERIA_DEFAULT_GROUP "HysteriaProvider"
 #define HYSTERIA2_DEFAULT_GROUP "Hysteria2Provider"
+#define TUIC_DEFAULT_GROUP "TUICProvider"
 
 #endif // PROXY_H_INCLUDED

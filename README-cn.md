@@ -11,6 +11,13 @@
 
 ## 新增内容
 
+2026/4/12
+
+-   新增 `tuic://` 链接解析能力，当前以常见 mihomo/OpenClash 使用的 TUIC 分享链接格式为基准
+-   新增 TUIC 节点导出能力，支持 `clash` 与 `singbox`
+-   对暂不支持的目标类型，导出时会跳过 TUIC 节点，其余节点继续正常导出
+-   OpenClash 的 TUIC 兼容口径限定为 `clash_meta / mihomo` 内核
+
 2026/3/1
 
 -   新增 `vless://` 节点解析能力，支持 Reality 参数（如 `security=reality`、`pbk`、`sid`、`fp`、`flow`）
@@ -187,6 +194,8 @@ http://127.0.0.1:25500/sub?target=%TARGET%&url=%URL%&config=%CONFIG%
 | target |  必要 | surge&ver=4               | 指想要生成的配置类型，详见上方 [支持类型](#支持类型) 中的参数                                                                                  |
 | url    |  必要 | https%3A%2F%2Fwww.xxx.com | 指机场所提供的订阅链接或代理节点的分享链接，需要经过 [URLEncode](https://www.urlencoder.org/) 处理                                              |
 | config |  可选 | https%3A%2F%2Fwww.xxx.com | 指 外部配置 的地址 (包含分组和规则部分)，需要经过 [URLEncode](https://www.urlencoder.org/) 处理，详见 [外部配置](#外部配置) ，当此参数不存在时使用 程序的主程序目录中的配置文件 |
+
+补充说明：当 `target=clash` 且未传入 `&config=` 时，程序会自动使用内置默认 Clash 配置 `config/default_clash_chainproxy.ini`（源码仓库中的对应文件为 `base/config/default_clash_chainproxy.ini`）。如果服务端配置里已经设置了 `default_external_config`，则仍然优先使用该配置；只有在它为空时，才会回退到这份内置 Clash 默认配置。如果你后续想手动调整这套默认 Clash 分组/规则，请直接修改这个文件；显式传入的 `&config=` 仍然会覆盖该内置默认值。
 
 运行 subconverter 主程序后，按照 [调用说明](#调用说明) 的对应内容替换即可得到一份使用**默认设置**的订阅。
 
@@ -1172,6 +1181,8 @@ custom_proxy_group=节点选择`select`(^(?!.*(美国|日本)).*)
 将文件按照以下格式写好，上传至 Github Gist 或者 其他**可访问**网络位置
 经过 [URLEncode](https://www.urlencoder.org/) 处理后，添加至 `&config=` 即可调用
 需要注意的是，由外部配置中所定义的值会**覆盖** 主程序目录中配置文件 里的内容
+
+当前仓库另外内置了一份仅用于 `target=clash` 且未提供 `&config=` 时的默认配置：运行时路径为 `config/default_clash_chainproxy.ini`，源码仓库路径为 `base/config/default_clash_chainproxy.ini`。这份文件已经吸收了默认 ChainProxyEntry / `♻️ 自动选择` 的 Clash 配置；如果要调整默认行为，请优先修改该文件，而不是远程 `nodnsleak.ini`。如需自定义其他方案，仍然可以继续通过 `&config=` 指向本地或远程外部配置。
 
 即，如果你在外部配置中定义了
 

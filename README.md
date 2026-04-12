@@ -23,6 +23,13 @@ Utility to convert between various proxy subscription formats.
 
 ## What's New
 
+2026/04/12
+
+- Added `tuic://` share-link parsing support for the scoped TUIC link family used by mihomo/OpenClash clients.
+- Added TUIC export support for `clash` and `singbox`.
+- Unsupported targets now skip TUIC nodes while continuing to export the remaining nodes.
+- OpenClash compatibility for TUIC is documented against `clash_meta / mihomo` cores only.
+
 2026/03/01
 
 - Added VLESS and Reality parsing support for `vless://` links.
@@ -55,8 +62,9 @@ Utility to convert between various proxy subscription formats.
 Notice:
 
 1. Shadowrocket users should use `ss`, `ssr`, `v2ray` or `vless` as target.
-
-2. You can add `&remark=` to Telegram-liked HTTP/Socks 5 links to set a remark for this node. For example:
+2. `tuic://` links are accepted as source nodes and can currently be exported to `clash` and `singbox`. There is no standalone `tuic` target.
+3. OpenClash TUIC compatibility is scoped to `clash_meta / mihomo` cores only.
+4. You can add `&remark=` to Telegram-liked HTTP/Socks 5 links to set a remark for this node. For example:
 
    - tg://http?server=1.2.3.4&port=233&user=user&pass=pass&remark=Example
 
@@ -82,6 +90,8 @@ http://127.0.0.1:25500/sub?target=%TARGET%&url=%URL%&config=%CONFIG%
 | target   | Yes      | clash   | Target subscription type. Acquire from Target Name in [Supported Types](#supported-types). |
 | url      | Yes      | https%3A%2F%2Fwww.xxx.com | Subscription to convert. Supports URLs and file paths. Process with [URLEncode](https://www.urlencoder.org/) first. |
 | config   | No       | https%3A%2F%2Fwww.xxx.com | External configuration file path. Supports URLs and file paths. Process with [URLEncode](https://www.urlencoder.org/) first. More examples can be found in [this](https://github.com/lzdnico/subconverteriniexample) repository. |
+
+For `target=clash`, when `&config=` is omitted, subconverter now falls back to the built-in default chain config at runtime path `config/default_clash_chainproxy.ini` (source repo path `base/config/default_clash_chainproxy.ini`). If `default_external_config` is already set in the server preferences, that configured value still takes precedence over the built-in Clash fallback. If you want to tune the built-in default Clash groups/rules later, edit that file. An explicit `&config=` still overrides the built-in default.
 
 If you need to merge two or more subscription, you should join them with '|' before the URLEncode process.
 
@@ -117,6 +127,8 @@ ss://YWVzLTEyOC1nY206VGVzdFBhc3N3b3Jk@198.51.100.10:443/?plugin=obfs-local%3Bobf
 ```
 
 For backward compatibility, `underlying-proxy=dialer` is still supported.
+
+The built-in default Clash chain config keeps `♻️ 自动选择` as a `url-test` group and exposes `ChainProxyEntry` as a manual `select` group so you can either choose a real node directly or switch to the auto-tested group.
 
 ---
 

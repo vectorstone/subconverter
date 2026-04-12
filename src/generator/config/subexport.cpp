@@ -188,7 +188,8 @@ bool applyMatcher(const std::string &rule, std::string &real_rule, const Proxy &
         {ProxyType::SOCKS5,       "SOCKS5"},
         {ProxyType::WireGuard,    "WIREGUARD"},
         {ProxyType::Hysteria,     "HYSTERIA"},
-        {ProxyType::Hysteria2,    "HYSTERIA2"}
+        {ProxyType::Hysteria2,    "HYSTERIA2"},
+        {ProxyType::TUIC,         "TUIC"}
     };
     if(startsWith(rule, "!!GROUP="))
     {
@@ -694,6 +695,22 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
                 singleproxy["cwnd"] = x.CWND;
             if (x.HopInterval)
                 singleproxy["hop-interval"] = x.HopInterval;
+            break;
+        case ProxyType::TUIC:
+            singleproxy["type"] = "tuic";
+            singleproxy["uuid"] = x.UserId;
+            singleproxy["password"] = x.Password;
+            if(!x.SNI.empty())
+                singleproxy["sni"] = x.SNI;
+            if(!scv.is_undef())
+                singleproxy["skip-cert-verify"] = scv.get();
+            if(!x.Alpn.empty())
+            {
+                for(const std::string &alpn : x.Alpn)
+                    singleproxy["alpn"].push_back(alpn);
+            }
+            if(!x.CongestionController.empty())
+                singleproxy["congestion-controller"] = x.CongestionController;
             break;
         default:
             continue;
@@ -2690,6 +2707,15 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
                 auto transport = buildSingBoxTransport(x, allocator);
                 if (!transport.ObjectEmpty())
                     proxy.AddMember("transport", transport, allocator);
+                break;
+            }
+            case ProxyType::TUIC:
+            {
+                addSingBoxCommonMembers(proxy, x, "tuic", allocator);
+                proxy.AddMember("uuid", rapidjson::StringRef(x.UserId.c_str()), allocator);
+                proxy.AddMember("password", rapidjson::StringRef(x.Password.c_str()), allocator);
+                if (!x.CongestionController.empty())
+                    proxy.AddMember("congestion_control", rapidjson::StringRef(x.CongestionController.c_str()), allocator);
                 break;
             }
             case ProxyType::WireGuard:
