@@ -6,3 +6,6 @@ DOMAIN-SUFFIX,dianping.com
 DOMAIN-SUFFIX,dpfile.com
 DOMAIN-SUFFIX,meituan.com
 DOMAIN-SUFFIX,nicehouse.cc
+DOMAIN-SUFFIX,douyin.com,DIRECT
+DOMAIN-SUFFIX,douyinpic.com,DIRECT
+DOMAIN-SUFFIX,douyinstatic.com,DIRECT
