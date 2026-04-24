@@ -51,6 +51,8 @@ dns:
     - '+.douyinpic.com'
     - '+.douyinstatic.com'
     - '+.alipan.com'
+    - '+.alibabadns.com'
+    - '+.aliyundrive.net'
   nameserver-policy:
     +.owolist.cn:
       - 223.5.5.5
