@@ -41,7 +41,16 @@ dns:
     - '*.msftconnecttest.com'
     - '*.msftncsi.com'
     - 'stun.*.*'
-    - '+.stun.*.*'
+    - '+.51ping.com'
+    - '+.sankuai.com'
+    - '+.dianping.com'
+    - '+.dpfile.com'
+    - '+.meituan.com'
+    - '+.nicehouse.com'
+    - '+.douyin.com'
+    - '+.douyinpic.com'
+    - '+.douyinstatic.com'
+    - '+.alipan.com'
   nameserver-policy:
     +.owolist.cn:
       - 223.5.5.5
