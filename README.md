@@ -128,7 +128,7 @@ ss://YWVzLTEyOC1nY206VGVzdFBhc3N3b3Jk@198.51.100.10:443/?plugin=obfs-local%3Bobf
 
 For backward compatibility, `underlying-proxy=dialer` is still supported.
 
-The built-in default Clash chain config keeps `♻️ 自动选择` as a `url-test` group and exposes `ChainProxyEntry` as a manual `select` group so you can either choose a real node directly or switch to the auto-tested group.
+The built-in default Clash chain config keeps `♻️ 自动选择` as a `url-test` group and exposes `ChainProxyEntry` as a manual `select` group so you can either choose a real node directly or switch to the auto-tested group. The external `nodnsleak.ini` template in the companion `clashConfig` repo now mirrors the same layout.
 
 ---
 
