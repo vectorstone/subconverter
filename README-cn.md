@@ -1182,7 +1182,7 @@ custom_proxy_group=节点选择`select`(^(?!.*(美国|日本)).*)
 经过 [URLEncode](https://www.urlencoder.org/) 处理后，添加至 `&config=` 即可调用
 需要注意的是，由外部配置中所定义的值会**覆盖** 主程序目录中配置文件 里的内容
 
-当前仓库另外内置了一份仅用于 `target=clash` 且未提供 `&config=` 时的默认配置：运行时路径为 `config/default_clash_chainproxy.ini`，源码仓库路径为 `base/config/default_clash_chainproxy.ini`。这份文件已经吸收了默认 ChainProxyEntry / `♻️ 自动选择` 的 Clash 配置；如果要调整默认行为，请优先修改该文件，而不是远程 `nodnsleak.ini`。如需自定义其他方案，仍然可以继续通过 `&config=` 指向本地或远程外部配置。
+当前仓库另外内置了一份仅用于 `target=clash` 且未提供 `&config=` 时的默认配置：运行时路径为 `config/default_clash_chainproxy.ini`，源码仓库路径为 `base/config/default_clash_chainproxy.ini`。这份文件已经吸收了默认 ChainProxyEntry / `♻️ 自动选择` 的 Clash 配置；配套外部模板仓库 `clashConfig` 中的 `nodnsleak.ini` 现也保持相同布局：`ChainProxyEntry` 为手动 `select`，`♻️ 自动选择` 仍为 `url-test`。如需调整内置默认行为，请修改该文件；如需调整外部模板行为，请修改对应的 `nodnsleak.ini`。如需自定义其他方案，仍然可以继续通过 `&config=` 指向本地或远程外部配置。
 
 即，如果你在外部配置中定义了
 
