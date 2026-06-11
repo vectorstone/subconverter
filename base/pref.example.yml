@@ -81,7 +81,7 @@ emojis:
 rulesets:
   enabled: true
   overwrite_original_rules: false
-  update_ruleset_on_request: false
+  update_ruleset_on_request: true
   rulesets:
 #  - {rule: "GEOIP,CN", group: "DIRECT"}
 #  - {ruleset: "rules/LocalAreaNetwork.list", group: "DIRECT"}
@@ -159,7 +159,7 @@ advanced:
   enable_cache: true
   cache_subscription: 300
   cache_config: 300
-  cache_ruleset: 21600
+  cache_ruleset: 0
   serve_cache_on_fetch_fail: true
   script_clean_context: true
   async_fetch_ruleset: true
