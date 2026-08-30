@@ -1,0 +1,3 @@
+# Domains that should use the proxy selector.
+# DOMAIN matches one hostname; DOMAIN-SUFFIX also matches subdomains.
+DOMAIN-SUFFIX,z.ai

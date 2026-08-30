@@ -197,6 +197,10 @@ http://127.0.0.1:25500/sub?target=%TARGET%&url=%URL%&config=%CONFIG%
 
 补充说明：当 `target=clash` 且未传入 `&config=` 时，程序会自动使用内置默认 Clash 配置 `config/default_clash_chainproxy.ini`（源码仓库中的对应文件为 `base/config/default_clash_chainproxy.ini`）。如果服务端配置里已经设置了 `default_external_config`，则仍然优先使用该配置；只有在它为空时，才会回退到这份内置 Clash 默认配置。如果你后续想手动调整这套默认 Clash 分组/规则，请直接修改这个文件；显式传入的 `&config=` 仍然会覆盖该内置默认值。
 
+为了长期维护自定义域名，默认配置已经引用 `base/rules/custom_proxy.list` 和 `base/rules/custom_direct.list`（运行时分别为 `rules/custom_proxy.list` 和 `rules/custom_direct.list`）。以后通常只需在这两个清单中增删域名，不必反复修改默认配置；清单中的规则按 `ruleset` 声明的顺序生成，放在前面的规则优先。默认情况下规则内容会缓存，修改清单后请重启服务，或调用 `/refreshrules?token=你的令牌` 刷新；开启 `update_ruleset_on_request=true` 后则会在请求时重新读取。
+
+这里的 `pref.ini` 是主程序目录下的全局偏好配置文件（也可以使用优先级更高的 `pref.yml` 或 `pref.toml`），用于设置默认订阅、基础模板、默认外部配置等运行参数；它不是 Clash 规则清单。`default_external_config` 如果被设置，会覆盖内置的 `default_clash_chainproxy.ini`。
+
 运行 subconverter 主程序后，按照 [调用说明](#调用说明) 的对应内容替换即可得到一份使用**默认设置**的订阅。
 
 由于此部分篇幅较长，点击下方条目即可展开详解：
