@@ -1,0 +1,2 @@
+# Domains that should bypass the proxy.
+# DOMAIN matches one hostname; DOMAIN-SUFFIX also matches subdomains.

@@ -93,6 +93,8 @@ http://127.0.0.1:25500/sub?target=%TARGET%&url=%URL%&config=%CONFIG%
 
 For `target=clash`, when `&config=` is omitted, subconverter now falls back to the built-in default chain config at runtime path `config/default_clash_chainproxy.ini` (source repo path `base/config/default_clash_chainproxy.ini`). If `default_external_config` is already set in the server preferences, that configured value still takes precedence over the built-in Clash fallback. If you want to tune the built-in default Clash groups/rules later, edit that file. An explicit `&config=` still overrides the built-in default.
 
+The default Clash config references `base/rules/custom_proxy.list` and `base/rules/custom_direct.list` (runtime paths `rules/custom_proxy.list` and `rules/custom_direct.list`). Maintain frequently changed domain exceptions in those lists; rules are emitted in declaration order, so keep proxy exceptions before broad direct rules. Rules are cached by default, so restart the service or call `/refreshrules?token=YOUR_TOKEN` after editing; set `update_ruleset_on_request=true` to reload them on each request.
+
 If you need to merge two or more subscription, you should join them with '|' before the URLEncode process.
 
 Example:
