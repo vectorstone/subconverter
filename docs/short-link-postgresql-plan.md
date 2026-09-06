@@ -120,12 +120,14 @@ GET /s/<code>
 - 保留 profile-update-interval 和 Subscription-UserInfo（如果存在）。
 - 支持 HEAD。
 - download=1 时增加 Content-Disposition。
+- 下载文件名固定为 custom-clash-YYMMDD.yaml；同一短日期存在多个配置时，从 -1、-2 依次编号。日期取当前快照的最后更新时间（updated_at）。
 
 短码不存在、已撤销或已过期时返回 410 Gone。
 
 ### 5.3 管理接口
 
 - GET /api/short-links：只列出当前用户的短链。
+- GET /api/short-links 的每条记录同时返回 short_url 和 download_url，后者下载当前快照。
 - POST /api/short-links/<id>/refresh：重新生成指定短链快照。
 - DELETE /api/short-links/<id>：撤销自己的短链。
 - POST /api/keys：创建用户 API Key。

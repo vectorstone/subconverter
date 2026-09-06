@@ -74,7 +74,9 @@
             const title = document.createElement('strong');
             title.textContent = item.name || '未命名短链';
             const detail = document.createElement('p');
-            const state = item.revoked_at ? '已撤销' : (item.expires_at && item.expires_at * 1000 < Date.now() ? '已过期' : '有效');
+            const expired = Boolean(item.expires_at && item.expires_at * 1000 <= Date.now());
+            const unavailable = Boolean(item.revoked_at) || expired;
+            const state = item.revoked_at ? '已撤销' : (expired ? '已过期' : '有效');
             detail.textContent = (item.owner ? item.owner + ' · ' : '') + item.links_count + ' 个输入 · 更新于 ' + formatDate(item.updated_at) + ' · ' + state;
             const url = document.createElement('code');
             url.textContent = item.short_url;
@@ -85,6 +87,19 @@
             copy.className = 'secondary';
             copy.textContent = '复制';
             copy.onclick = () => copyText(item.short_url);
+            const download = document.createElement('a');
+            download.className = 'button';
+            download.textContent = '下载 YAML';
+            download.href = item.download_url || (item.short_url + (item.short_url.includes('?') ? '&' : '?') + 'download=1');
+            download.setAttribute('download', '');
+            download.rel = 'noreferrer';
+            if (unavailable) {
+                download.className += ' disabled';
+                download.removeAttribute('href');
+                download.setAttribute('aria-disabled', 'true');
+                download.title = '已过期或已撤销，无法下载';
+                download.onclick = (event) => event.preventDefault();
+            }
             const revoke = document.createElement('button');
             revoke.className = 'danger';
             revoke.textContent = '撤销';
@@ -105,7 +120,7 @@
                 await loadList();
                 if (shortUrl.value === item.short_url) await loadPreview(item.short_url);
             };
-            actions.append(copy, refresh, revoke);
+            actions.append(copy, download, refresh, revoke);
             row.append(body, actions);
             linksList.append(row);
         }

@@ -20,6 +20,7 @@ button:hover, .button:hover { filter: brightness(.96); }
 button.secondary, .button.secondary { color: #31558f; background: #eaf1ff; }
 button.danger { color: #a43c46; background: #fff0f1; }
 button:disabled { opacity: .5; cursor: not-allowed; }
+.button.disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
 .message { min-height: 22px; margin: 16px 0 0; color: #3f6fd9; }
 .message.error { color: #bd3d49; }
 .section-title { justify-content: space-between; }
