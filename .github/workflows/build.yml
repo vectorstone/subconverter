@@ -118,11 +118,13 @@ jobs:
             artifact: subconverter_win32
             env: i686
             msystem: MINGW32
+            postgresql_dependency: https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-icu-76.1-1-any.pkg.tar.zst
             postgresql_package: https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-postgresql-16.1-1-any.pkg.tar.zst
           - arch: amd64
             artifact: subconverter_win64
             env: x86_64
             msystem: MINGW64
+            postgresql_dependency: ''
             postgresql_package: mingw-w64-x86_64-postgresql
     runs-on: windows-latest
     name: Windows ${{ matrix.arch }} Build
@@ -150,7 +152,7 @@ jobs:
     - name: Install PostgreSQL client
       run: |
         if [[ "${{ matrix.postgresql_package }}" == https://* ]]; then
-          pacman --noconfirm -U "${{ matrix.postgresql_package }}"
+          pacman --noconfirm -U "${{ matrix.postgresql_dependency }}" "${{ matrix.postgresql_package }}"
         else
           pacman --noconfirm -S --needed "${{ matrix.postgresql_package }}"
         fi
