@@ -2,6 +2,9 @@
 set -xe
 
 brew reinstall rapidjson zlib pcre2 pkgconfig
+brew install libpq openssl@3
+export PKG_CONFIG_PATH="$(brew --prefix libpq)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+export CMAKE_PREFIX_PATH="$(brew --prefix libpq):$(brew --prefix openssl@3):${CMAKE_PREFIX_PATH:-}"
 
 #git clone https://github.com/curl/curl --depth=1 --branch curl-7_88_1
 #cd curl
@@ -51,7 +54,7 @@ cmake -DCMAKE_BUILD_TYPE=Release .
 make -j6
 rm subconverter
 # shellcheck disable=SC2046
-c++ -Xlinker -unexported_symbol -Xlinker "*" -o base/subconverter -framework CoreFoundation -framework Security $(find CMakeFiles/subconverter.dir/src/ -name "*.o") "$(brew --prefix zlib)/lib/libz.a" "$(brew --prefix pcre2)/lib/libpcre2-8.a" $(find . -name "*.a") -lcurl -O3
+c++ -Xlinker -unexported_symbol -Xlinker "*" -o base/subconverter -framework CoreFoundation -framework Security $(find CMakeFiles/subconverter.dir/src/ -name "*.o") "$(brew --prefix zlib)/lib/libz.a" "$(brew --prefix pcre2)/lib/libpcre2-8.a" $(find . -name "*.a") -lcurl $(pkg-config --libs --static libpq openssl) -O3
 
 python -m ensurepip
 sudo python -m pip install gitpython

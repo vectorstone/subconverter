@@ -2,7 +2,7 @@
 set -xe
 
 apk add gcc g++ build-base linux-headers cmake make autoconf automake libtool python3 py3-pip
-apk add mbedtls-dev mbedtls-static zlib-dev zlib-static rapidjson-dev pcre2-dev pcre2-static brotli-dev brotli-static zstd-dev zstd-static libpsl-dev libpsl-static
+apk add mbedtls-dev mbedtls-static zlib-dev zlib-static rapidjson-dev pcre2-dev pcre2-static brotli-dev brotli-static zstd-dev zstd-static libpsl-dev libpsl-static libpq-dev openssl-dev openssl-libs-static
 
 git clone https://github.com/curl/curl --depth=1 --branch curl-8_21_0
 cd curl
@@ -45,7 +45,7 @@ cmake -DCMAKE_BUILD_TYPE=Release .
 make -j3
 rm subconverter
 # shellcheck disable=SC2046
-g++ -o base/subconverter $(find CMakeFiles/subconverter.dir/src/ -name "*.o")  -static -lpcre2-8 -lyaml-cpp -L/usr/lib64 -lcurl -lmbedtls -lmbedcrypto -lmbedx509 -lz -lbrotlidec -lbrotlicommon -lzstd -l:quickjs/libquickjs.a -llibcron -O3 -s
+g++ -o base/subconverter $(find CMakeFiles/subconverter.dir/src/ -name "*.o") -static -lpcre2-8 -lyaml-cpp -L/usr/lib64 -lcurl -lmbedtls -lmbedcrypto -lmbedx509 -lz -lbrotlidec -lbrotlicommon -lzstd -l:quickjs/libquickjs.a -llibcron $(pkg-config --libs --static libpq openssl) -O3 -s
 
 pip install --break-system-packages gitpython
 python3 scripts/update_rules.py -c scripts/rules_config.conf
