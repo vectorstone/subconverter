@@ -53,8 +53,7 @@ ldd base/subconverter.exe | awk '/\/mingw(32|64)\/bin\// {print $3}' | while rea
     cp -f "$dll" base/
 done
 
-python -m ensurepip
-python -m pip install gitpython
+python -m pip install --break-system-packages gitpython
 python scripts/update_rules.py -c scripts/rules_config.conf
 
 mv base subconverter
