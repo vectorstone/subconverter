@@ -1,9 +1,9 @@
 #!/bin/bash
 set -xe
 
-git clone https://github.com/curl/curl --depth=1 --branch curl-8_6_0
+git clone https://github.com/curl/curl --depth=1 --branch curl-8_21_0
 cd curl
-cmake -DCMAKE_BUILD_TYPE=Release -DCURL_USE_LIBSSH2=OFF -DHTTP_ONLY=ON -DCURL_USE_SCHANNEL=ON -DBUILD_SHARED_LIBS=OFF -DBUILD_CURL_EXE=OFF -DCMAKE_INSTALL_PREFIX="$MINGW_PREFIX" -G "Unix Makefiles" -DHAVE_LIBIDN2=OFF -DCURL_USE_LIBPSL=OFF .
+cmake -DCMAKE_BUILD_TYPE=Release -DHTTP_ONLY=ON -DCURL_USE_SCHANNEL=ON -DBUILD_SHARED_LIBS=OFF -DBUILD_CURL_EXE=OFF -DCMAKE_INSTALL_PREFIX="$MINGW_PREFIX" -G "Unix Makefiles" -DCURL_USE_LIBSSH2=OFF -DUSE_WIN32_IDN=ON -DCURL_USE_LIBPSL=OFF -DCURL_ZSTD=ON -DCURL_BROTLI=ON -DUSE_NGHTTP2=OFF .
 make install -j4
 cd ..
 
@@ -38,20 +38,21 @@ cmake -DRAPIDJSON_BUILD_DOC=OFF -DRAPIDJSON_BUILD_EXAMPLES=OFF -DRAPIDJSON_BUILD
 make install -j4
 cd ..
 
-git clone https://github.com/ToruNiina/toml11 --branch "v4.3.0" --depth=1
+git clone https://github.com/ToruNiina/toml11 --branch "v4.4.0" --depth=1
 cd toml11
 cmake -DCMAKE_INSTALL_PREFIX="$MINGW_PREFIX" -G "Unix Makefiles" -DCMAKE_CXX_STANDARD=11 .
 make install -j4
 cd ..
-
-python -m ensurepip
-python -m pip install gitpython
-python scripts/update_rules.py -c scripts/rules_config.conf
 
 rm -f C:/Strawberry/perl/bin/pkg-config C:/Strawberry/perl/bin/pkg-config.bat
 cmake -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" .
 make -j4
 rm subconverter.exe
 # shellcheck disable=SC2046
-g++ $(find CMakeFiles/subconverter.dir/src -name "*.obj") curl/lib/libcurl.a -o base/subconverter.exe -static -lbcrypt -lpcre2-8 -l:quickjs/libquickjs.a -llibcron -lyaml-cpp -liphlpapi -lcrypt32 -lws2_32 -lwsock32 -lz -s
+g++ $(find CMakeFiles/subconverter.dir/src -name "*.obj") curl/lib/libcurl.a -o base/subconverter.exe -static -lpcre2-8 -l:quickjs/libquickjs.a -llibcron -lyaml-cpp -lbrotlidec -lbrotlicommon -lzstd -lz -liphlpapi -lsecur32 -lcrypt32 -lbcrypt -lws2_32 -lwsock32 -s
+
+python -m ensurepip
+python -m pip install gitpython
+python scripts/update_rules.py -c scripts/rules_config.conf
+
 mv base subconverter

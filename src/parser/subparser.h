@@ -82,6 +82,19 @@ void hysteria2Construct(
     tribool scv, 
     const std::string &underlying_proxy = ""
 );
+void anyTLSConstruct(
+    Proxy &node,
+    const std::string &group,
+    const std::string &remarks,
+    const std::string &server,
+    const std::string &port,
+    const std::string &password,
+    const std::string &sni,
+    tribool udp,
+    tribool tfo,
+    tribool scv,
+    const std::string &underlying_proxy = ""
+);
 void tuicConstruct(
     Proxy &node,
     const std::string &group,
@@ -111,6 +124,7 @@ void explodeShadowrocket(std::string kit, Proxy &node);
 void explodeKitsunebi(std::string kit, Proxy &node);
 void explodeHysteria2(std::string hysteria2, Proxy &node);
 void explodeTUIC(std::string tuic, Proxy &node);
+void explodeAnyTLS(std::string anytls, Proxy &node);
 
 /// Parse a link
 void explode(const std::string &link, Proxy &node);
