@@ -10,6 +10,14 @@ docker run -d --restart=always -p 25500:25500 a823002162/subconvert:latest
 curl http://localhost:25500/version
 # if you see `subconverter vx.x.x backend` then the container is up and running
 ```
+
+## PostgreSQL short-link deployment
+
+The repository includes docker-compose.shortlink.yml for the multi-user Web UI and PostgreSQL short-link service. Copy the compose file to the VPS, provide DATABASE_URL, API_TOKEN, POSTGRES_PASSWORD, and SHORTLINK_ENCRYPTION_KEY through a protected .env or Docker Secret, then use an immutable SUBCONVERTER_IMAGE digest for production.
+
+The service exposes the subconverter container on 127.0.0.1:15052 by default. Put Nginx and Cloudflare in front of it, protect / and /api/ with authentication and rate limits, and leave /s/<code> publicly readable for Clash clients. The production base URL defaults to https://hi.nicetoken.win and can be overridden with PUBLIC_BASE_URL.
+
+The complete API, PostgreSQL schema, snapshot chaining behavior, encryption, quotas, and rollback procedure are documented in docs/short-link-postgresql-plan.md.
 Or run in docker-compose:
 ```yaml
 ---

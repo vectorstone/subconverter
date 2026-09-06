@@ -41,13 +41,16 @@ ADD_EXECUTABLE(${BUILD_TARGET_NAME}
     src/handler/upload.cpp
     src/handler/webget.cpp
     src/handler/settings.cpp
+    src/handler/shortlink_api.cpp
     src/main.cpp
     src/parser/infoparser.cpp
     src/parser/subparser.cpp
     src/script/cron.cpp
     src/script/script_quickjs.cpp
+    src/security/secretbox.cpp
 #    src/server/webserver_libevent.cpp
     src/server/webserver_httplib.cpp
+    src/storage/postgres_store.cpp
     src/utils/base64/base64.cpp
     src/utils/codepage.cpp
     src/utils/file.cpp
@@ -79,6 +82,14 @@ TARGET_LINK_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CURL_LIBRARY_DIRS})
 TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
 TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} CURL::libcurl)
 TARGET_COMPILE_DEFINITIONS(${BUILD_TARGET_NAME} PRIVATE -DCURL_STATICLIB)
+
+PKG_CHECK_MODULES(LIBPQ libpq REQUIRED)
+TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${LIBPQ_INCLUDE_DIRS})
+TARGET_LINK_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${LIBPQ_LIBRARY_DIRS})
+TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} ${LIBPQ_LIBRARIES})
+
+FIND_PACKAGE(OpenSSL REQUIRED)
+TARGET_LINK_LIBRARIES(${BUILD_TARGET_NAME} OpenSSL::Crypto)
 
 FIND_PACKAGE(Rapidjson REQUIRED)
 TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${RAPIDJSON_INCLUDE_DIRS})

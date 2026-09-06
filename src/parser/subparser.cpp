@@ -1191,7 +1191,7 @@ void explodeNetch(std::string netch, Proxy &node)
 
 void explodeClash(Node yamlnode, std::vector<Proxy> &nodes)
 {
-    std::string proxytype, ps, server, port, cipher, group, password, underlying_proxy; //common
+    std::string proxytype, ps, server, port, cipher, group, password, underlying_proxy, dialer_proxy; //common
     std::string type = "none", id, aid = "0", net = "tcp", path, host, edge, tls, sni, flow, pbk, sid, packet_encoding, encryption; //vmess/vless
     std::string plugin, pluginopts, pluginopts_mode, pluginopts_host, pluginopts_mux; //ss
     std::string protocol, protoparam, obfs, obfsparam; //ssr
@@ -1213,6 +1213,10 @@ void explodeClash(Node yamlnode, std::vector<Proxy> &nodes)
         singleproxy["server"] >>= server;
         singleproxy["port"] >>= port;
         singleproxy["underlying-proxy"] >>= underlying_proxy;
+        if(underlying_proxy.empty())
+            singleproxy["dialer-proxy"] >>= dialer_proxy;
+        if(underlying_proxy.empty())
+            underlying_proxy = dialer_proxy;
         if(port.empty() || port == "0")
             continue;
         udp = safe_as<std::string>(singleproxy["udp"]);

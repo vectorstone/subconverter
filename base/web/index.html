@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>SubConverter 短链管理</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<main class="page">
+    <header class="hero">
+        <p class="eyebrow">SUBCONVERTER</p>
+        <h1>节点订阅短链</h1>
+        <p class="subtitle">输入节点或机场订阅链接，生成可直接用于 Clash Verge / mihomo 的配置短链。</p>
+    </header>
+    <section class="card">
+        <form id="create-form">
+            <label for="name">名称</label>
+            <input id="name" name="name" maxlength="120" placeholder="例如：家庭 Clash">
+            <label for="links">节点链接（每行一个）</label>
+            <textarea id="links" name="links" required spellcheck="false" placeholder="ss://...\nvless://...\ntuic://..."></textarea>
+            <div class="form-row">
+                <div>
+                    <label for="expires">有效期</label>
+                    <select id="expires" name="expires">
+                        <option value="604800">7 天</option>
+                        <option value="2592000" selected>30 天</option>
+                        <option value="7776000">90 天</option>
+                        <option value="0">永久</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="submit">生成短链</button>
+                    <button type="button" id="clear-button" class="secondary">清空</button>
+                </div>
+            </div>
+        </form>
+        <p id="message" class="message" role="status"></p>
+    </section>
+    <section id="result-card" class="card hidden">
+        <div class="section-title"><h2>生成结果</h2><span id="result-meta" class="muted"></span></div>
+        <label for="short-url">订阅短链</label>
+        <div class="copy-row"><input id="short-url" readonly><button type="button" id="copy-button">复制</button></div>
+        <div class="button-row"><a id="preview-link" class="button secondary" target="_blank" rel="noreferrer">打开短链</a><a id="download-link" class="button" download>下载 YAML</a></div>
+        <label for="preview">配置预览</label>
+        <pre id="preview" class="preview"></pre>
+    </section>
+    <section class="card">
+        <div class="section-title"><h2>我的短链</h2><button type="button" id="refresh-button" class="secondary">刷新</button></div>
+        <div id="links-list" class="links-list"><p class="muted">登录后加载。</p></div>
+    </section>
+    <section id="admin-card" class="card hidden">
+        <div class="section-title"><h2>管理员：用户管理</h2><span class="muted">仅管理员可见</span></div>
+        <form id="admin-user-form" class="admin-form">
+            <input id="admin-subject" required placeholder="Cloudflare Access 邮箱或 subject">
+            <input id="admin-email" placeholder="邮箱（可选）">
+            <select id="admin-role"><option value="user">普通用户</option><option value="admin">管理员</option></select>
+            <button type="submit">保存用户</button>
+        </form>
+        <div id="users-list" class="links-list"></div>
+    </section>
+</main>
+<script src="/app.js" defer></script>
+</body>
+</html>

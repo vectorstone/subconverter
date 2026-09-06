@@ -1,0 +1,47 @@
+services:
+    subconverter:
+        image: ${SUBCONVERTER_IMAGE:-a823002162/subconvert:latest}
+        container_name: subconverter
+        restart: unless-stopped
+        ports:
+            - "127.0.0.1:${SUBCONVERTER_PORT:-15052}:25500"
+        environment:
+            API_MODE: "true"
+            API_TOKEN: ${API_TOKEN:?API_TOKEN is required}
+            PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://hi.nicetoken.win}
+            SHORTLINK_ENABLED: "true"
+            SHORTLINK_TRUST_ACCESS_HEADER: ${SHORTLINK_TRUST_ACCESS_HEADER:-false}
+            SHORTLINK_ADMIN_SUBJECTS: ${SHORTLINK_ADMIN_SUBJECTS:-}
+            DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+            SHORTLINK_ENCRYPTION_KEY: ${SHORTLINK_ENCRYPTION_KEY:?SHORTLINK_ENCRYPTION_KEY is required}
+            SHORTLINK_MAX_ACTIVE: ${SHORTLINK_MAX_ACTIVE:-100}
+            SHORTLINK_MAX_PER_HOUR: ${SHORTLINK_MAX_PER_HOUR:-20}
+            SHORTLINK_MAX_OUTPUT_BYTES: ${SHORTLINK_MAX_OUTPUT_BYTES:-16777216}
+        depends_on:
+            subconverter-postgres:
+                condition: service_healthy
+        networks:
+            - subconverter-network
+
+    subconverter-postgres:
+        image: postgres:16-alpine
+        container_name: subconverter-postgres
+        restart: unless-stopped
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER:-subconverter}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+            POSTGRES_DB: ${POSTGRES_DB:-subconverter}
+            TZ: ${TZ:-Asia/Shanghai}
+        volumes:
+            - /opt/subconverter/postgres_data:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-subconverter} -d ${POSTGRES_DB:-subconverter}"]
+            interval: 10s
+            timeout: 5s
+            retries: 6
+        networks:
+            - subconverter-network
+
+networks:
+    subconverter-network:
+        driver: bridge

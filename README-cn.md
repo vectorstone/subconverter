@@ -1490,3 +1490,15 @@ http://127.0.0.1:25500/getruleset?type=%TYPE%&url=%URL%&group=%GROUP%
 | group | type=2时必选 | mygroup | 规则对应的策略组名，生成Quantumult X类型（type=2）时必须提供                                                                                                                  |
 
 运行 subconverter 主程序后， 按照 [调用地址 (规则转换)](#调用地址-规则转换) 的对应内容替换即可得到指定类型的规则。
+
+### Web UI 短链（PostgreSQL）
+
+启用 SHORTLINK_ENABLED=true 并配置 DATABASE_URL、SHORTLINK_ENCRYPTION_KEY 后，服务会提供根路径 Web UI 和 PostgreSQL 短链接口。Web UI 通过 Cloudflare Access 登录，用于输入多个节点/机场链接、生成 Clash 配置快照、复制短链、预览、下载、刷新和撤销；普通页面不显示 API Key 输入框，API Key 保留给自动化调用。
+
+短链读取地址为 /s/<code>，直接返回 Clash YAML，不使用重定向，因此可以直接填写到 Clash Verge、mihomo/OpenClash 等客户端。短链读取不要求登录；创建、列表、刷新和撤销接口必须通过 Cloudflare Access 或用户 API Key 鉴权。
+
+短链采用快照模式。已有短链可以作为新的 HTTPS 输入源，与其他 SS、VLESS、TUIC 或机场订阅合并后生成新的短链。短链内容、过期时间和撤销状态保存在 PostgreSQL 中，节点凭据通过 SHORTLINK_ENCRYPTION_KEY 加密。
+
+管理员通过 API_TOKEN 或 SHORTLINK_ADMIN_SUBJECTS（Cloudflare Access 邮箱/subject 白名单）识别。管理员可以查看、刷新和撤销所有用户的短链，并通过 /api/admin/users 管理用户角色；普通用户只能管理自己的短链。普通用户也可以创建永久短链，但仍受有效数量和限流配额约束。
+
+生产部署请使用独立 PostgreSQL database/role，设置 api_mode=true，并为 /、/api/ 配置登录和限流；/s/ 与原有 /sub 需要保持客户端可访问但禁止缓存。详细接口、数据模型和部署步骤见 docs/short-link-postgresql-plan.md。

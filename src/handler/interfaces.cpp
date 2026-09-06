@@ -97,7 +97,7 @@ static int fetchNodeBatch(const string_array &urls, int initial_group_id, std::v
             if(fetched.ret == -1)
             {
                 if(global.skipFailedLinks)
-                    writeLog(0, "The following link doesn't contain any valid node info: " + fetched.link, LOG_LEVEL_WARNING);
+                    writeLog(0, "The following link doesn't contain any valid node info: " + redactLinkForLog(fetched.link), LOG_LEVEL_WARNING);
                 else
                 {
                     *status_code = 400;
@@ -715,25 +715,25 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
             for(std::string &x : urls)
             {
                 x = regTrim(x);
-                writeLog(0, "Queueing node data fetch for url '" + x + "'.", LOG_LEVEL_INFO);
+            writeLog(0, "Queueing node data fetch for url '" + redactLinkForLog(x) + "'.", LOG_LEVEL_INFO);
             }
             if(fetchNodeBatch(urls, groupID, insert_nodes, subInfo, parse_set, status_code, &failed_link) == -1)
-                return "The following link doesn't contain any valid node info: " + failed_link;
+                return "The following link doesn't contain any valid node info: " + redactLinkForLog(failed_link);
         }
         else
         {
             for(std::string &x : urls)
             {
                 x = regTrim(x);
-                writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
+                writeLog(0, "Fetching node data from url '" + redactLinkForLog(x) + "'.", LOG_LEVEL_INFO);
                 if(addNodes(x, insert_nodes, groupID, parse_set) == -1)
                 {
                     if(global.skipFailedLinks)
-                        writeLog(0, "The following link doesn't contain any valid node info: " + x, LOG_LEVEL_WARNING);
+                        writeLog(0, "The following link doesn't contain any valid node info: " + redactLinkForLog(x), LOG_LEVEL_WARNING);
                     else
                     {
                         *status_code = 400;
-                        return "The following link doesn't contain any valid node info: " + x;
+                        return "The following link doesn't contain any valid node info: " + redactLinkForLog(x);
                     }
                 }
                 groupID--;
@@ -751,10 +751,10 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         for(std::string &x : urls)
         {
             x = regTrim(x);
-            writeLog(0, "Queueing node data fetch for url '" + x + "'.", LOG_LEVEL_INFO);
+                writeLog(0, "Queueing node data fetch for url '" + redactLinkForLog(x) + "'.", LOG_LEVEL_INFO);
         }
         if(fetchNodeBatch(urls, groupID, nodes, subInfo, parse_set, status_code, &failed_link) == -1)
-            return "The following link doesn't contain any valid node info: " + failed_link;
+            return "The following link doesn't contain any valid node info: " + redactLinkForLog(failed_link);
     }
     else
     {
@@ -762,15 +762,15 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         {
             x = regTrim(x);
             //std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
-            writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
+            writeLog(0, "Fetching node data from url '" + redactLinkForLog(x) + "'.", LOG_LEVEL_INFO);
             if(addNodes(x, nodes, groupID, parse_set) == -1)
             {
                 if(global.skipFailedLinks)
-                    writeLog(0, "The following link doesn't contain any valid node info: " + x, LOG_LEVEL_WARNING);
+                    writeLog(0, "The following link doesn't contain any valid node info: " + redactLinkForLog(x), LOG_LEVEL_WARNING);
                 else
                 {
                     *status_code = 400;
-                    return "The following link doesn't contain any valid node info: " + x;
+                    return "The following link doesn't contain any valid node info: " + redactLinkForLog(x);
                 }
             }
             groupID++;
@@ -1216,15 +1216,15 @@ std::string surgeConfToClash(RESPONSE_CALLBACK_ARGS)
     for(std::string &x : links)
     {
         //std::cerr<<"Fetching node data from url '"<<x<<"'."<<std::endl;
-        writeLog(0, "Fetching node data from url '" + x + "'.", LOG_LEVEL_INFO);
+        writeLog(0, "Fetching node data from url '" + redactLinkForLog(x) + "'.", LOG_LEVEL_INFO);
         if(addNodes(x, nodes, 0, parse_set) == -1)
         {
             if(global.skipFailedLinks)
-                writeLog(0, "The following link doesn't contain any valid node info: " + x, LOG_LEVEL_WARNING);
+                writeLog(0, "The following link doesn't contain any valid node info: " + redactLinkForLog(x), LOG_LEVEL_WARNING);
             else
             {
                 *status_code = 400;
-                return "The following link doesn't contain any valid node info: " + x;
+                return "The following link doesn't contain any valid node info: " + redactLinkForLog(x);
             }
         }
     }
