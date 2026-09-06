@@ -118,10 +118,12 @@ jobs:
             artifact: subconverter_win32
             env: i686
             msystem: MINGW32
+            postgresql_package: https://repo.msys2.org/mingw/mingw32/mingw-w64-i686-postgresql-16.1-1-any.pkg.tar.zst
           - arch: amd64
             artifact: subconverter_win64
             env: x86_64
             msystem: MINGW64
+            postgresql_package: mingw-w64-x86_64-postgresql
     runs-on: windows-latest
     name: Windows ${{ matrix.arch }} Build
     defaults:
@@ -142,9 +144,16 @@ jobs:
       uses: msys2/setup-msys2@v2
       with:
         update: true
-        install: base-devel git mingw-w64-${{ matrix.env }}-gcc mingw-w64-${{ matrix.env }}-cmake mingw-w64-${{ matrix.env }}-pcre2 mingw-w64-${{ matrix.env }}-brotli mingw-w64-${{ matrix.env }}-zstd mingw-w64-${{ matrix.env }}-postgresql mingw-w64-${{ matrix.env }}-openssl patch
+        install: base-devel git mingw-w64-${{ matrix.env }}-gcc mingw-w64-${{ matrix.env }}-cmake mingw-w64-${{ matrix.env }}-pcre2 mingw-w64-${{ matrix.env }}-brotli mingw-w64-${{ matrix.env }}-zstd mingw-w64-${{ matrix.env }}-openssl patch
         msystem: ${{ matrix.msystem }}
         path-type: inherit
+    - name: Install PostgreSQL client
+      run: |
+        if [[ "${{ matrix.postgresql_package }}" == https://* ]]; then
+          pacman --noconfirm -U "${{ matrix.postgresql_package }}"
+        else
+          pacman --noconfirm -S --needed "${{ matrix.postgresql_package }}"
+        fi
     - name: Add commit id into version
       if: ${{ !startsWith(github.ref, 'refs/tags/') }}
       run: SHA=$(git rev-parse --short HEAD) && sed -i 's/\(v[0-9]\.[0-9]\.[0-9]\)/\1-'"$SHA"'/' src/version.h
