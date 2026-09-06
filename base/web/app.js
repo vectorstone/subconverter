@@ -13,6 +13,7 @@
     const linksList = document.querySelector('#links-list');
     const adminCard = document.querySelector('#admin-card');
     const usersList = document.querySelector('#users-list');
+    const adminUserForm = document.querySelector('#admin-user-form');
 
     const setMessage = (text, error) => {
         message.textContent = text || '';
@@ -111,6 +112,7 @@
     };
 
     const loadAdminUsers = async () => {
+        if (!adminCard || !usersList) return;
         const response = await fetch('/api/admin/users', { cache: 'no-store' });
         if (!response.ok) return;
         const data = await response.json();
@@ -165,7 +167,7 @@
         setMessage('', false);
     };
     document.querySelector('#refresh-button').onclick = loadList;
-    document.querySelector('#admin-user-form').addEventListener('submit', async (event) => {
+    if (adminUserForm) adminUserForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         const response = await fetch('/api/admin/users', {
             method: 'POST',
