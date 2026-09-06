@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdlib>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,15 @@ std::int64_t parse_timestamp(const std::string &value)
     if(value.empty())
         return 0;
     return std::strtoll(value.c_str(), nullptr, 10);
+}
+
+bool local_tm_safe(std::time_t timestamp, std::tm &value)
+{
+#if defined(_WIN32)
+    return localtime_s(&value, &timestamp) == 0;
+#else
+    return localtime_r(&timestamp, &value) != nullptr;
+#endif
 }
 }
 
@@ -419,6 +429,42 @@ bool PostgresStore::list_short_links(const std::string &owner, std::vector<Short
     }
     PQclear(result);
     return ok;
+}
+
+bool PostgresStore::get_download_sequence(const ShortLinkRecord &record, int &sequence)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    sequence = 1;
+    if(!connection_ || record.id.empty() || record.updated_at <= 0)
+        return false;
+
+    const std::time_t raw_time = static_cast<std::time_t>(record.updated_at);
+    std::tm local_day{};
+    if(!local_tm_safe(raw_time, local_day))
+        return false;
+    local_day.tm_hour = 0;
+    local_day.tm_min = 0;
+    local_day.tm_sec = 0;
+    const std::time_t day_start = std::mktime(&local_day);
+    if(day_start < 0)
+        return false;
+    local_day.tm_mday += 1;
+    const std::time_t day_end = std::mktime(&local_day);
+    if(day_end <= day_start)
+        return false;
+
+    const std::string start = std::to_string(static_cast<long long>(day_start));
+    const std::string end = std::to_string(static_cast<long long>(day_end));
+    const std::string updated = std::to_string(record.updated_at);
+    const char *values[] = {record.owner.c_str(), start.c_str(), end.c_str(), updated.c_str(), record.id.c_str()};
+    PGresult *result = nullptr;
+    const bool ok = exec_params(connection_,
+        "SELECT COUNT(*)::text FROM short_links WHERE owner_subject = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW()) AND updated_at >= to_timestamp($2::double precision) AND updated_at < to_timestamp($3::double precision) AND (EXTRACT(EPOCH FROM updated_at)::bigint < $4::bigint OR (EXTRACT(EPOCH FROM updated_at)::bigint = $4::bigint AND id <= $5::bigint))",
+        {values[0], values[1], values[2], values[3], values[4]}, &result);
+    if(ok && PQntuples(result) > 0)
+        sequence = std::max(1, std::atoi(result_value(result, 0, 0).c_str()));
+    PQclear(result);
+    return ok && sequence > 0;
 }
 
 bool PostgresStore::revoke_short_link(const std::string &owner, const std::string &id, bool all_owners)

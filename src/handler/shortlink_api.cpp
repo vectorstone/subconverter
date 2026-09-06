@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <atomic>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,36 @@ std::atomic<std::int64_t> last_cleanup{0};
 std::int64_t unix_now()
 {
     return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+bool local_tm(std::time_t timestamp, std::tm &value)
+{
+#if defined(_WIN32)
+    return localtime_s(&value, &timestamp) == 0;
+#else
+    return localtime_r(&timestamp, &value) != nullptr;
+#endif
+}
+
+std::string short_date(std::int64_t timestamp)
+{
+    const std::time_t raw_time = static_cast<std::time_t>(timestamp > 0 ? timestamp : unix_now());
+    std::tm local{};
+    char buffer[7] = {};
+    if(!local_tm(raw_time, local) || std::strftime(buffer, sizeof(buffer), "%y%m%d", &local) == 0)
+        return "000000";
+    return buffer;
+}
+
+std::string download_filename(const ShortLinkRecord &record)
+{
+    const std::int64_t timestamp = record.updated_at > 0 ? record.updated_at : unix_now();
+    int sequence = 1;
+    store.get_download_sequence(record, sequence);
+    std::string filename = "custom-clash-" + short_date(timestamp);
+    if(sequence > 1)
+        filename += "-" + std::to_string(sequence - 1);
+    return filename + ".yaml";
 }
 
 void maybe_cleanup()
@@ -269,6 +300,11 @@ std::string shortlink_url(const std::string &code)
     return config.public_base_url + "/s/" + code;
 }
 
+std::string shortlink_download_url(const std::string &url)
+{
+    return url + (url.find('?') == std::string::npos ? "?download=1" : "&download=1");
+}
+
 bool parse_shortlink_request(const std::string &body, string_array &links, std::string &target, int &ttl, std::string &name, std::string &error)
 {
     if(body.size() > config.max_input_bytes)
@@ -365,7 +401,7 @@ std::string conversion_snapshot(const string_array &links, Response &conversion_
 std::string create_response(const ShortLinkRecord &record)
 {
     const std::string url = shortlink_url(record.code);
-    const std::string download = url + (url.find('?') == std::string::npos ? "?download=1" : "&download=1");
+    const std::string download = shortlink_download_url(url);
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     writer.StartObject();
@@ -545,7 +581,9 @@ std::string listShortLinks(RESPONSE_CALLBACK_ARGS)
         writer.Key("name"); writer.String(record.name.c_str());
         writer.Key("target"); writer.String(record.target.c_str());
         writer.Key("links_count"); writer.Int(record.links_count);
-        writer.Key("short_url"); writer.String(shortlink_url(record.code).c_str());
+        const std::string url = shortlink_url(record.code);
+        writer.Key("short_url"); writer.String(url.c_str());
+        writer.Key("download_url"); writer.String(shortlink_download_url(url).c_str());
         writer.Key("created_at"); writer.Int64(record.created_at);
         writer.Key("updated_at"); writer.Int64(record.updated_at);
         writer.Key("expires_at"); writer.Int64(record.expires_at);
@@ -746,7 +784,7 @@ std::string getShortLink(RESPONSE_CALLBACK_ARGS)
     apply_headers(record.response_headers, response);
     response.headers["Cache-Control"] = "no-store";
     if(getUrlArg(request.argument, "download") == "1")
-        response.headers["Content-Disposition"] = "attachment; filename=custom-clash.yaml";
+        response.headers["Content-Disposition"] = "attachment; filename=\"" + download_filename(record) + "\"";
     if(request.method == "HEAD")
         return "";
     return snapshot;
