@@ -10,6 +10,7 @@
 #include "handler/interfaces.h"
 #include "handler/webget.h"
 #include "handler/settings.h"
+#include "handler/shortlink_api.h"
 #include "script/cron.h"
 #include "server/socket.h"
 #include "server/webserver.h"
@@ -174,6 +175,9 @@ int main(int argc, char *argv[])
     if(!env_token.empty())
         global.accessToken = env_token;
 
+    if(!initializeShortLinkService())
+        return 1;
+
     if(global.generatorMode)
         return simpleGenerator();
 
@@ -263,6 +267,17 @@ int main(int argc, char *argv[])
     webServer.append_response("GET", "/sub", "text/plain;charset=utf-8", subconverter);
 
     webServer.append_response("HEAD", "/sub", "text/plain", subconverter);
+
+    webServer.append_response("POST", "/api/short-links", "application/json;charset=utf-8", createShortLink);
+    webServer.append_response("GET", "/api/short-links", "application/json;charset=utf-8", listShortLinks);
+    webServer.append_response("DELETE", R"(/api/short-links/[0-9]+)", "application/json;charset=utf-8", revokeShortLink);
+    webServer.append_response("POST", R"(/api/short-links/[0-9]+/refresh)", "application/json;charset=utf-8", refreshShortLink);
+    webServer.append_response("POST", "/api/keys", "application/json;charset=utf-8", createShortLinkApiKey);
+    webServer.append_response("DELETE", R"(/api/keys/[0-9]+)", "application/json;charset=utf-8", revokeShortLinkApiKey);
+    webServer.append_response("GET", "/api/admin/users", "application/json;charset=utf-8", listShortLinkUsers);
+    webServer.append_response("POST", "/api/admin/users", "application/json;charset=utf-8", upsertShortLinkUser);
+    webServer.append_response("GET", R"(/s/[A-Za-z0-9_-]{24})", "text/yaml;charset=utf-8", getShortLink);
+    webServer.append_response("HEAD", R"(/s/[A-Za-z0-9_-]{24})", "text/yaml;charset=utf-8", getShortLink);
 
     webServer.append_response("GET", "/sub2clashr", "text/plain;charset=utf-8", simpleToClashR);
 

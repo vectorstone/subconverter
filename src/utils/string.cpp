@@ -382,6 +382,14 @@ std::string randomStr(int len)
     return retData;
 }
 
+std::string redactLinkForLog(const std::string &link)
+{
+    const std::size_t scheme_end = link.find("://");
+    if(scheme_end == std::string::npos)
+        return "<local-input>";
+    return link.substr(0, scheme_end + 3) + "<redacted,len=" + std::to_string(link.size()) + ">";
+}
+
 int to_int(const std::string &str, int def_value)
 {
     if(str.empty())

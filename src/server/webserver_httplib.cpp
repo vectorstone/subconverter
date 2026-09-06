@@ -1,4 +1,5 @@
 #include <string>
+#include <cctype>
 #ifdef MALLOC_TRIM
 #include <malloc.h>
 #endif // MALLOC_TRIM
@@ -24,6 +25,19 @@ static inline bool is_request_header_blacklisted(const std::string &header)
         }
     }
     return false;
+}
+
+static inline bool is_short_link_path(const std::string &path)
+{
+    if (!startsWith(path, "/s/") || path.size() != 27)
+        return false;
+    for(std::size_t index = 3; index < path.size(); index++)
+    {
+        const unsigned char c = static_cast<unsigned char>(path[index]);
+        if(!(std::isalnum(c) || c == '_' || c == '-'))
+            return false;
+    }
+    return true;
 }
 
 void WebServer::stop_web_server()
@@ -146,7 +160,7 @@ int WebServer::start_web_server_multi(listener_args *args)
         writeLog(0, "handle_cmd:    " + req.method + " handle_uri:    " + req.target, LOG_LEVEL_VERBOSE);
         writeLog(0, "handle_header: " + dump(req.headers), LOG_LEVEL_VERBOSE);
 
-        if (req.has_header("SubConverter-Request"))
+        if (req.has_header("SubConverter-Request") && !is_short_link_path(req.path))
         {
             res.status = 500;
             res.set_content("Loop request detected!", "text/plain");

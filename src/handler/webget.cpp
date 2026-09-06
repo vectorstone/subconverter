@@ -269,7 +269,7 @@ static int curlGet(const FetchArgument &argument, FetchResult &result)
         curl_easy_getinfo(curl_handle, CURLINFO_HTTP_CODE, &code);
         if(!should_retry_fetch(retVal, code) || attempt + 1 >= max_attempts)
             break;
-        writeLog(0, "Fetch attempt " + std::to_string(attempt + 1) + " for '" + argument.url + "' failed with curl=" + std::to_string(retVal) + " http=" + std::to_string(code) + ", retrying.", LOG_LEVEL_DEBUG);
+        writeLog(0, "Fetch attempt " + std::to_string(attempt + 1) + " for '" + redactLinkForLog(argument.url) + "' failed with curl=" + std::to_string(retVal) + " http=" + std::to_string(code) + ", retrying.", LOG_LEVEL_DEBUG);
         if(global.fetchRetryBackoff > 0)
             std::this_thread::sleep_for(std::chrono::milliseconds(global.fetchRetryBackoff * (attempt + 1)));
         attempt++;
@@ -304,7 +304,7 @@ static int curlGet(const FetchArgument &argument, FetchResult &result)
     }
 
     const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count();
-    writeLog(0, "Fetch '" + argument.url + "' completed in " + std::to_string(duration_ms) + "ms with http=" + std::to_string(code) + ", curl=" + std::to_string(retVal) + ", attempts=" + std::to_string(attempt + 1) + ".", LOG_LEVEL_DEBUG);
+    writeLog(0, "Fetch '" + redactLinkForLog(argument.url) + "' completed in " + std::to_string(duration_ms) + "ms with http=" + std::to_string(code) + ", curl=" + std::to_string(retVal) + ", attempts=" + std::to_string(attempt + 1) + ".", LOG_LEVEL_DEBUG);
 
     return *result.status_code;
 }
@@ -355,7 +355,7 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
             time_t mtime = result.st_mtime, now = time(nullptr); // get cache modified time and current time
             if(difftime(now, mtime) <= cache_ttl) // within TTL
             {
-                writeLog(0, "CACHE HIT: '" + url + "', using local cache.");
+                writeLog(0, "CACHE HIT: '" + redactLinkForLog(url) + "', using local cache.");
                 //guarded_mutex guard(cache_rw_lock);
                 cache_rw_lock.readLock();
                 defer(cache_rw_lock.readUnlock();)
@@ -363,10 +363,10 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
                     *response_headers = fileGet(path_header, true);
                 return fileGet(path, true);
             }
-            writeLog(0, "CACHE MISS: '" + url + "', TTL timeout, creating new cache."); // out of TTL
+            writeLog(0, "CACHE MISS: '" + redactLinkForLog(url) + "', TTL timeout, creating new cache."); // out of TTL
         }
         else
-            writeLog(0, "CACHE NOT EXIST: '" + url + "', creating new cache.");
+            writeLog(0, "CACHE NOT EXIST: '" + redactLinkForLog(url) + "', creating new cache.");
         //content = curlGet(url, proxy, response_headers, return_code); // try to fetch data
         curlGet(argument, fetch_res);
         if(return_code == 200) // success, save new cache
