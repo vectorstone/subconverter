@@ -17,6 +17,8 @@ The repository includes docker-compose.shortlink.yml for the multi-user Web UI a
 
 The service exposes the subconverter container on 127.0.0.1:15052 by default. Put Nginx and Cloudflare in front of it, protect / and /api/ with authentication and rate limits, and leave /s/<code> publicly readable for Clash clients. The production base URL defaults to https://hi.nicetoken.win and can be overridden with PUBLIC_BASE_URL.
 
+New and explicitly refreshed short links use the bundled Lite Clash profile by default (`SHORTLINK_CLASH_CONFIG=config/default_clash_lite.ini`, `SHORTLINK_CLASH_EXPAND=false`). The profile emits rule providers instead of embedding the full rule corpus. `SHORTLINK_LITE_MAX_OUTPUT_BYTES` defaults to 262144. Set `SHORTLINK_CLASH_CONFIG=config/default_clash_chainproxy.ini` and `SHORTLINK_CLASH_EXPAND=true` only for an operational rollback. Existing snapshots are not rewritten when these variables change.
+
 The complete API, PostgreSQL schema, snapshot chaining behavior, encryption, quotas, and rollback procedure are documented in docs/short-link-postgresql-plan.md.
 Or run in docker-compose:
 ```yaml

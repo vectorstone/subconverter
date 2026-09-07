@@ -17,6 +17,9 @@ services:
             SHORTLINK_MAX_ACTIVE: ${SHORTLINK_MAX_ACTIVE:-100}
             SHORTLINK_MAX_PER_HOUR: ${SHORTLINK_MAX_PER_HOUR:-20}
             SHORTLINK_MAX_OUTPUT_BYTES: ${SHORTLINK_MAX_OUTPUT_BYTES:-16777216}
+            SHORTLINK_CLASH_CONFIG: ${SHORTLINK_CLASH_CONFIG:-config/default_clash_lite.ini}
+            SHORTLINK_CLASH_EXPAND: ${SHORTLINK_CLASH_EXPAND:-false}
+            SHORTLINK_LITE_MAX_OUTPUT_BYTES: ${SHORTLINK_LITE_MAX_OUTPUT_BYTES:-262144}
         depends_on:
             subconverter-postgres:
                 condition: service_healthy

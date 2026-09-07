@@ -25,6 +25,9 @@
 
 namespace
 {
+constexpr const char *shortlink_clash_lite_config_path = "config/default_clash_lite.ini";
+constexpr const char *shortlink_clash_chainproxy_config_path = "config/default_clash_chainproxy.ini";
+
 struct ShortLinkConfig
 {
     bool enabled = false;
@@ -39,8 +42,12 @@ struct ShortLinkConfig
     int max_ttl = 365 * 24 * 60 * 60;
     std::size_t max_input_bytes = 64 * 1024;
     std::size_t max_output_bytes = 16 * 1024 * 1024;
+    std::size_t lite_max_output_bytes = 256 * 1024;
     int max_links = 100;
     bool allow_private_hosts = false;
+    // Short-link conversions never accept a client-provided config path.
+    std::string clash_config = shortlink_clash_lite_config_path;
+    bool clash_expand = false;
 };
 
 ShortLinkConfig config;
@@ -104,6 +111,31 @@ int env_int(const std::string &name, int fallback)
 {
     const std::string value = getEnv(name);
     return value.empty() ? fallback : to_int(value, fallback);
+}
+
+void configure_shortlink_clash_profile()
+{
+    // Keep the environment override intentionally narrow: it can select a
+    // bundled profile for an operational rollback, but cannot load an
+    // arbitrary local path or remote URL.
+    const std::string profile = toLower(trim(getEnv("SHORTLINK_CLASH_CONFIG")));
+    if(profile.empty() || profile == "lite" || profile == shortlink_clash_lite_config_path)
+        config.clash_config = shortlink_clash_lite_config_path;
+    else if(profile == "chainproxy" || profile == shortlink_clash_chainproxy_config_path)
+        config.clash_config = shortlink_clash_chainproxy_config_path;
+    else
+    {
+        config.clash_config = shortlink_clash_lite_config_path;
+        writeLog(0, "Ignoring unsupported SHORTLINK_CLASH_CONFIG selection; using the Lite profile.", LOG_LEVEL_WARNING);
+    }
+    config.clash_expand = env_bool("SHORTLINK_CLASH_EXPAND", false);
+}
+
+bool lite_snapshot_too_large(const std::string &snapshot)
+{
+    return config.clash_config == shortlink_clash_lite_config_path
+        && !config.clash_expand
+        && snapshot.size() > config.lite_max_output_bytes;
 }
 
 std::string random_code(std::size_t length)
@@ -392,7 +424,11 @@ std::string conversion_snapshot(const string_array &links, Response &conversion_
     conversion_request.argument.emplace("target", "clash");
     conversion_request.argument.emplace("url", join(links, "|"));
     conversion_request.argument.emplace("insert", "false");
-    conversion_request.argument.emplace("config", "");
+    // The profile is service-controlled so API callers cannot inject config
+    // paths or external URLs. Lite is the default; operators may choose one
+    // of the explicitly allowed bundled rollback profiles at startup.
+    conversion_request.argument.emplace("config", config.clash_config);
+    conversion_request.argument.emplace("expand", config.clash_expand ? "true" : "false");
     conversion_request.headers = {};
     std::string snapshot = subconverter(conversion_request, conversion_response);
     return snapshot;
@@ -473,8 +509,10 @@ bool initializeShortLinkService()
     config.max_ttl = std::max(env_int("SHORTLINK_MAX_TTL", 365 * 24 * 60 * 60), config.default_ttl);
     config.max_input_bytes = static_cast<std::size_t>(std::max(env_int("SHORTLINK_MAX_INPUT_BYTES", 64 * 1024), 1024));
     config.max_output_bytes = static_cast<std::size_t>(std::max(env_int("SHORTLINK_MAX_OUTPUT_BYTES", 16 * 1024 * 1024), 1024));
+    config.lite_max_output_bytes = static_cast<std::size_t>(std::max(env_int("SHORTLINK_LITE_MAX_OUTPUT_BYTES", 256 * 1024), 1024));
     config.max_links = std::max(env_int("SHORTLINK_MAX_LINKS", 100), 1);
     config.allow_private_hosts = env_bool("SHORTLINK_ALLOW_PRIVATE_HOSTS", false);
+    configure_shortlink_clash_profile();
     if(config.connection_string.empty() || config.encryption_key.empty())
     {
         writeLog(0, "SHORTLINK_ENABLED requires DATABASE_URL and SHORTLINK_ENCRYPTION_KEY.", LOG_LEVEL_ERROR);
@@ -515,6 +553,8 @@ std::string createShortLink(RESPONSE_CALLBACK_ARGS)
     const std::string snapshot = conversion_snapshot(links, conversion_response);
     if(snapshot.size() > config.max_output_bytes)
         return json_error(response, 413, "generated configuration is too large");
+    if(lite_snapshot_too_large(snapshot))
+        return json_error(response, 413, "generated Lite configuration exceeds the configured size limit");
     if(conversion_response.status_code < 200 || conversion_response.status_code >= 300 || snapshot.empty())
     {
         response.status_code = conversion_response.status_code >= 400 ? conversion_response.status_code : 400;
@@ -640,6 +680,10 @@ std::string refreshShortLink(RESPONSE_CALLBACK_ARGS)
         return json_error(response, 500, "short-link source has no links");
     Response conversion_response;
     const std::string snapshot = conversion_snapshot(links, conversion_response);
+    if(snapshot.size() > config.max_output_bytes)
+        return json_error(response, 413, "generated configuration is too large");
+    if(lite_snapshot_too_large(snapshot))
+        return json_error(response, 413, "generated Lite configuration exceeds the configured size limit");
     std::string snapshot_payload;
     if(conversion_response.status_code < 200 || conversion_response.status_code >= 300 || snapshot.empty() || !secret_box.encrypt(snapshot, snapshot_payload))
         return json_error(response, conversion_response.status_code >= 400 ? conversion_response.status_code : 500, "unable to refresh short-link snapshot");
