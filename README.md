@@ -18,6 +18,7 @@ Utility to convert between various proxy subscription formats.
     - [Access Interface](#access-interface)
     - [Description](#description)
     - [Dialer Node Parameter (SS Links)](#dialer-node-parameter-ss-links)
+  - [Web UI Short Links (PostgreSQL)](#web-ui-short-links-postgresql)
   - [Advanced Usage](#advanced-usage)
   - [Auto Upload](#auto-upload)
 
@@ -131,6 +132,23 @@ ss://YWVzLTEyOC1nY206VGVzdFBhc3N3b3Jk@198.51.100.10:443/?plugin=obfs-local%3Bobf
 For backward compatibility, `underlying-proxy=dialer` is still supported.
 
 The built-in default Clash chain config keeps `♻️ 自动选择` as a `url-test` group and exposes `ChainProxyEntry` as a manual `select` group so you can either choose a real node directly or switch to the auto-tested group. The external `nodnsleak.ini` template in the companion `clashConfig` repo now mirrors the same layout.
+
+## Web UI Short Links (PostgreSQL)
+
+With `SHORTLINK_ENABLED=true`, `DATABASE_URL`, and `SHORTLINK_ENCRYPTION_KEY` configured, the service provides a Cloudflare Access-protected Web UI and PostgreSQL-backed short-link API. `GET /s/<code>` remains public and returns Clash YAML directly; create, list, refresh, and revoke require Cloudflare Access or a user API key.
+
+Short links use the Lite Clash conversion profile by default: `SHORTLINK_CLASH_CONFIG=config/default_clash_lite.ini` and `SHORTLINK_CLASH_EXPAND=false`. The service fixes the target to `clash`, disables inserts, and does not accept an arbitrary per-request `config` from Web UI/API users. This keeps stored snapshots small by emitting remote rule providers instead of embedding the complete rule contents. `SHORTLINK_LITE_MAX_OUTPUT_BYTES` defaults to 262144 and rejects an unexpectedly large Lite snapshot before it is stored.
+
+The variables are also the configuration rollback switch. To temporarily restore the older expanded chain profile for newly created or refreshed links, set `SHORTLINK_CLASH_CONFIG=config/default_clash_chainproxy.ini` and `SHORTLINK_CLASH_EXPAND=true`, then restart the service. Restore the Lite values and restart to roll forward again. Existing snapshots are immutable on read: older snapshots continue to download unchanged, while an explicit `POST /api/short-links/<id>/refresh` recalculates that link from its encrypted original sources using the settings active at refresh time. Refreshing A never changes a dependent short link B.
+
+For a local authenticated smoke check, run:
+
+```bash
+API_KEY='your-user-api-key' BASE_URL='http://127.0.0.1:25500' ASSERT_LITE_OUTPUT=1 \
+  bash tests/shortlink_api_smoke.sh
+```
+
+`ASSERT_LITE_OUTPUT=1` additionally requires a bounded snapshot (default 256 KiB) containing `rule-providers` and `RULE-SET` references. Set `LITE_MAX_SNAPSHOT_BYTES` to adjust the test bound for a custom Lite template.
 
 ---
 

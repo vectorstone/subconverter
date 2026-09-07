@@ -1,10 +1,10 @@
 # SubConverter 多用户短链与 Web UI 技术方案
 
-状态：代码实现与 VPS/Cloudflare 部署完成
+状态：现有短链服务已完成 VPS/Cloudflare 部署；Lite 快照改造已在仓库实现，尚未发布镜像或部署到生产
 
-方案日期：2026-09-06
+方案日期：2026-09-06；Lite 快照方案更新：2026-09-07
 
-本文记录已批准方案、当前实现状态和部署结果。代码实现、镜像构建、VPS 容器、Nginx 和 Cloudflare Access 路径调整均已完成。
+本文记录已批准方案、当前实现状态和部署结果。原有短链服务、镜像、VPS 容器、Nginx 和 Cloudflare Access 路径已完成部署；2026-09-07 增加的 Lite 快照改造目前只完成仓库实现与本地转换验证，仍需构建镜像、灰度部署和 iOS/Android/macOS 客户端验收。
 
 ## 1. 目标
 
@@ -46,7 +46,7 @@
 创建短链 A 时：
 
 1. 校验用户身份、配额和输入。
-2. 使用当前转换核心生成 Clash YAML。
+2. 使用受服务端控制的 Lite Clash 转换配置生成 YAML。
 3. 加密保存原始链接、转换参数和最近一次生成的 YAML 快照。
 4. 返回随机短码。
 
@@ -66,6 +66,18 @@
 如果需要跟踪机场上游更新，提供“刷新短链”操作。刷新 A 只更新 A，不隐式修改 B。
 
 当前服务的内部请求会带 SubConverter-Request: 1，并触发 Loop request detected。/s/<code> 只返回静态快照，因此可以对该路径做专门的循环检测豁免；不得让该路径递归调用转换器。
+
+### 3.1 Lite 配置、旧快照与刷新边界
+
+短链创建和刷新统一固定为 `target=clash`、`insert=false`，不使用调用方提交的任意 `config`。服务端通过以下环境变量选择受控模板：
+
+- `SHORTLINK_CLASH_CONFIG`：默认 `config/default_clash_lite.ini`。
+- `SHORTLINK_CLASH_EXPAND`：默认 `false`。
+- `SHORTLINK_LITE_MAX_OUTPUT_BYTES`：默认 262144，阻止异常增大的 Lite 快照写入数据库。
+
+Lite 模式避免把远端规则全文写入快照，生成 `rule-providers` 和少量 `RULE-SET` 引用，以限制数据库快照体积。转换阶段仍会读取规则源元数据，客户端也需要能够访问 provider URL。
+
+读取 `/s/<code>` 永远解密并返回已保存的快照，不会根据当前环境重新生成。因此 Lite 上线前生成的旧快照无需迁移，仍可原样读取。只有用户或管理员显式执行刷新时，服务才从该记录加密保存的原始链接重新转换，并以刷新时生效的 `SHORTLINK_CLASH_CONFIG`/`SHORTLINK_CLASH_EXPAND` 写入新的快照；链式短链的下游快照不会被级联重算。
 
 ## 4. 总体架构
 
@@ -286,6 +298,9 @@ Clash YAML 解析器要同时兼容 dialer-proxy 和 underlying-proxy。/s/<code
 - API_TOKEN
 - SHORTLINK_ENCRYPTION_KEY
 - SHORTLINK_ENABLED=true
+- SHORTLINK_CLASH_CONFIG=config/default_clash_lite.ini
+- SHORTLINK_CLASH_EXPAND=false
+- SHORTLINK_LITE_MAX_OUTPUT_BYTES=262144
 
 镜像使用不可变 digest，保留旧镜像用于回滚。数据库发布前先备份。
 
@@ -305,6 +320,15 @@ Clash YAML 解析器要同时兼容 dialer-proxy 和 underlying-proxy。/s/<code
 
 真实节点只用于手工验证，不写入仓库测试夹具。
 
+最小本地 API 验收（需服务已连接测试 PostgreSQL，且使用测试用户 API Key）：
+
+```bash
+API_KEY='test-user-api-key' BASE_URL='http://127.0.0.1:25500' ASSERT_LITE_OUTPUT=1 \
+  bash tests/shortlink_api_smoke.sh
+```
+
+脚本创建短链、读取 YAML、验证下载头、显式刷新、再次读取并撤销。`ASSERT_LITE_OUTPUT=1` 时还要求快照不超过 `LITE_MAX_SNAPSHOT_BYTES`（默认 262144），并验证输出同时包含 `rule-providers` 与 `RULE-SET` 引用。
+
 ## 14. 实施阶段
 
 阶段 A：修复 Dialer 往返兼容、抽取转换入口、增加日志脱敏。
@@ -322,6 +346,8 @@ Clash YAML 解析器要同时兼容 dialer-proxy 和 underlying-proxy。/s/<code
 - 发布前备份 PostgreSQL。
 - 短链功能异常时可关闭 SHORTLINK_ENABLED，不影响原有 /sub。
 - 保留原有长链接口作为临时替代方案。
+- Lite 配置异常时，将 `SHORTLINK_CLASH_CONFIG=config/default_clash_chainproxy.ini` 和 `SHORTLINK_CLASH_EXPAND=true` 后重启服务，可让后续创建和显式刷新暂时回到旧展开式配置；恢复 `config/default_clash_lite.ini` 与 `false` 后重启即可回到 Lite。
+- 该回滚不会改写任何已保存快照。若需要按回滚配置更新某一条短链，必须显式刷新该条记录；先在测试记录验证再批量操作。
 
 ## 16. 审核确认清单
 
