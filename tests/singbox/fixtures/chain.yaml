@@ -1,0 +1,38 @@
+proxies:
+  - name: "FRONT-A"
+    type: ss
+    server: 198.51.100.30
+    port: 8388
+    cipher: aes-128-gcm
+    password: "test-password-a"
+  - name: "LAND-OK"
+    type: ss
+    server: 198.51.100.31
+    port: 8388
+    cipher: aes-128-gcm
+    password: "test-password-b"
+    dialer-proxy: "FRONT-A"
+  - name: "CYC-1"
+    type: ss
+    server: 198.51.100.32
+    port: 8388
+    cipher: aes-128-gcm
+    password: "test-password-c"
+    dialer-proxy: "CYC-2"
+  - name: "CYC-2"
+    type: ss
+    server: 198.51.100.33
+    port: 8388
+    cipher: aes-128-gcm
+    password: "test-password-d"
+    dialer-proxy: "CYC-1"
+  - name: "DANGLE"
+    type: ss
+    server: 198.51.100.34
+    port: 8388
+    cipher: aes-128-gcm
+    password: "test-password-e"
+    dialer-proxy: "NOT-EXIST"
+rules:
+  - GEOIP,CN,DIRECT
+  - MATCH,PROXY

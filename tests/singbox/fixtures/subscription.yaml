@@ -1,0 +1,72 @@
+proxies:
+  - name: "SS-01"
+    type: ss
+    server: 198.51.100.10
+    port: 8388
+    cipher: aes-128-gcm
+    password: "test-password-1"
+  - name: "VMess-WS"
+    type: vmess
+    server: 198.51.100.11
+    port: 443
+    uuid: 11111111-2222-3333-4444-555555555555
+    alterId: 0
+    cipher: auto
+    tls: true
+    servername: example.com
+    network: ws
+    ws-opts:
+      path: /ws
+      headers:
+        Host: example.com
+  - name: "VLESS-REALITY"
+    type: vless
+    server: 198.51.100.12
+    port: 443
+    uuid: 11111111-2222-3333-4444-555555555555
+    tls: true
+    servername: www.example.org
+    flow: xtls-rprx-vision
+    client-fingerprint: chrome
+    reality-opts:
+      public-key: tTjmwAXdjAZYA0561YDYXBxotYbCxDSwezm1kBUbaQs
+      short-id: abcd1234
+    network: tcp
+  - name: "Trojan-01"
+    type: trojan
+    server: 198.51.100.13
+    port: 443
+    password: "test-password-2"
+    sni: example.net
+    skip-cert-verify: false
+    network: grpc
+    grpc-opts:
+      grpc-service-name: gs
+  - name: "LAND-SS"
+    type: ss
+    server: 198.51.100.20
+    port: 55885
+    cipher: aes-128-gcm
+    password: "test-password-3"
+    dialer-proxy: "VLESS-REALITY"
+  - name: "TUIC-01"
+    type: tuic
+    server: 198.51.100.14
+    port: 443
+    uuid: 11111111-2222-3333-4444-555555555555
+    password: "test-password-4"
+    congestion-controller: bbr
+    alpn: [h3]
+    sni: example.com
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: ["SS-01", "VMess-WS", "VLESS-REALITY", "Trojan-01", "LAND-SS", "TUIC-01", DIRECT]
+  - name: Auto
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    proxies: ["SS-01", "VMess-WS"]
+rules:
+  - GEOIP,CN,DIRECT
+  - MATCH,PROXY
