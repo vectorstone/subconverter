@@ -162,25 +162,32 @@ bool configured_admin_subject(const std::string &subject)
     return std::find(config.admin_subjects.begin(), config.admin_subjects.end(), subject) != config.admin_subjects.end();
 }
 
-bool authenticate_request(const Request &request, std::string &owner, bool &admin)
+bool authenticate_identity(const Request &request, ShortLinkAuthIdentity &identity)
 {
-    admin = is_admin_token(request);
-    if(admin)
+    identity.is_admin = is_admin_token(request);
+    if(identity.is_admin)
     {
-        owner = "admin";
-        return store.ensure_user(owner);
+        identity.owner = "admin";
+        identity.auth_kind = "bootstrap_token";
+        return store.ensure_user(identity.owner);
     }
 
     auto key_it = request.headers.find("X-API-Key");
-    if(key_it != request.headers.end() && store.authenticate_api_key(sha256Hex(key_it->second), owner))
-        return store.ensure_user(owner);
+    if(key_it != request.headers.end() && store.authenticate_api_key(sha256Hex(key_it->second), identity.owner))
+    {
+        identity.auth_kind = "api_key";
+        return store.ensure_user(identity.owner);
+    }
 
     auto auth_it = request.headers.find("Authorization");
     if(auth_it != request.headers.end() && startsWith(auth_it->second, "Bearer "))
     {
         const std::string key = auth_it->second.substr(7);
-        if(store.authenticate_api_key(sha256Hex(key), owner))
-            return store.ensure_user(owner);
+        if(store.authenticate_api_key(sha256Hex(key), identity.owner))
+        {
+            identity.auth_kind = "api_key";
+            return store.ensure_user(identity.owner);
+        }
     }
 
     if(config.trust_access_header)
@@ -188,20 +195,31 @@ bool authenticate_request(const Request &request, std::string &owner, bool &admi
         auto access_it = request.headers.find("Cf-Access-Authenticated-User-Email");
         if(access_it != request.headers.end() && !trim(access_it->second).empty())
         {
-            owner = trim(access_it->second);
-            admin = configured_admin_subject(owner) || store.user_is_admin(owner);
-            return store.ensure_user(owner, owner, admin ? "admin" : "user");
+            identity.owner = trim(access_it->second);
+            identity.is_admin = configured_admin_subject(identity.owner) || store.user_is_admin(identity.owner);
+            identity.auth_kind = "access_header";
+            return store.ensure_user(identity.owner, identity.owner, identity.is_admin ? "admin" : "user");
         }
     }
 
     const std::string dev_user = getEnv("SHORTLINK_DEV_USER");
     if(!dev_user.empty())
     {
-        owner = dev_user;
-        admin = configured_admin_subject(owner) || store.user_is_admin(owner);
-        return store.ensure_user(owner, owner, admin ? "admin" : "user");
+        identity.owner = dev_user;
+        identity.is_admin = configured_admin_subject(identity.owner) || store.user_is_admin(identity.owner);
+        identity.auth_kind = "dev_user";
+        return store.ensure_user(identity.owner, identity.owner, identity.is_admin ? "admin" : "user");
     }
     return false;
+}
+
+bool authenticate_request(const Request &request, std::string &owner, bool &admin)
+{
+    ShortLinkAuthIdentity identity;
+    const bool ok = authenticate_identity(request, identity);
+    owner = identity.owner;
+    admin = identity.is_admin;
+    return ok;
 }
 
 std::string json_error(Response &response, int status, const std::string &message)
@@ -570,6 +588,16 @@ bool initializeShortLinkService()
 bool shortLinkServiceEnabled()
 {
     return config.enabled && store.ready() && secret_box.ready();
+}
+
+bool authenticateShortLinkRequest(const Request &request, ShortLinkAuthIdentity &identity)
+{
+    return shortLinkServiceEnabled() && authenticate_identity(request, identity);
+}
+
+PostgresStore &shortLinkStore()
+{
+    return store;
 }
 
 std::string createShortLink(RESPONSE_CALLBACK_ARGS)

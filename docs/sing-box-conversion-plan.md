@@ -168,7 +168,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 | `route.auto_detect_interface` | ✅ | ✅ | ✅ | ❌ 不支持 | ❌ 不支持 | ✅（必开） |
 | `strict_route` | ✅ | ✅ | ✅ | ❌ 未实现 | ❌ 未实现 | ✅ |
 | `auto_redirect` | ❌ 写了直接 check 失败 | ❌ | 仅可选（root+nft） | ❌ | ❌ | ✅（默认开） |
-| `dns_mode`/`dns_address`（tun 级） | 可选 | 可选 | 可选 | ✅ hijack + 172.19.0.2 | ✅ 同 Android | **不写**（dnsmasq 接管；劫持规则限定 `inbound:["dns-in"]`） |
+| `dns_mode`/`dns_address`（tun 级） | 可选 | 可选 | 可选 | ✅ hijack + tun 对端地址（`172.19.0.1/30` 的对端） | ✅ 同 Android | **不写**（dnsmasq 接管；劫持规则限定 `inbound:["dns-in"]`） |
 | `tun.platform.http_proxy` | 可选 | — | — | — | 可选（SFI/SFM） | — |
 | `route.override_android_vpn` | — | — | — | ✅ | — | — |
 | 进程/用户规则 | ✅ | ✅ | ✅ | ❌（用 `package_name`，GUI 可覆盖） | ❌ | ✅ |
@@ -250,7 +250,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 "inbounds": [
   { "type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],
     "mtu":8500,"stack":"mixed","auto_route":true,
-    "dns_mode":"hijack","dns_address":["172.19.0.2"] }
+    "dns_mode":"hijack","dns_address":["<TUN_PEER_IP>"] }   // tun 网段 +1
 ],
 "route": { "default_domain_resolver":"dns-direct", "override_android_vpn": true, "final":"PROXY" }
 ```
@@ -261,7 +261,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 "inbounds": [
   { "type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],
     "mtu":8500,"stack":"system","auto_route":true,
-    "dns_mode":"hijack","dns_address":["172.19.0.2"] }
+    "dns_mode":"hijack","dns_address":["<TUN_PEER_IP>"] }   // tun 网段 +1
 ]
 ```
 （可选 `platform.http_proxy`；其余同 Android 的「不输出」清单。）

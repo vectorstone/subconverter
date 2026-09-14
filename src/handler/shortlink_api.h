@@ -5,8 +5,19 @@
 
 #include "server/webserver.h"
 
+class PostgresStore;
+
+struct ShortLinkAuthIdentity
+{
+    std::string owner;
+    bool is_admin = false;
+    std::string auth_kind;
+};
+
 bool initializeShortLinkService();
 bool shortLinkServiceEnabled();
+bool authenticateShortLinkRequest(const Request &request, ShortLinkAuthIdentity &identity);
+PostgresStore &shortLinkStore();
 
 std::string createShortLink(RESPONSE_CALLBACK_ARGS);
 std::string listShortLinks(RESPONSE_CALLBACK_ARGS);

@@ -31,6 +31,9 @@ int main(){std::to_string(0);}
 
 IF(NOT BUILD_STATIC_LIBRARY)
 
+FILE(READ "${CMAKE_SOURCE_DIR}/db/migrations/002_usage.sql" USAGE_SCHEMA_SQL)
+CONFIGURE_FILE(src/storage/usage_schema.h.in "${CMAKE_BINARY_DIR}/generated/usage_schema.h" @ONLY)
+
 ADD_EXECUTABLE(${BUILD_TARGET_NAME} 
     src/generator/config/nodemanip.cpp
     src/generator/config/ruleconvert.cpp
@@ -43,6 +46,7 @@ ADD_EXECUTABLE(${BUILD_TARGET_NAME}
     src/handler/webget.cpp
     src/handler/settings.cpp
     src/handler/shortlink_api.cpp
+    src/handler/usage_api.cpp
     src/main.cpp
     src/parser/infoparser.cpp
     src/parser/subparser.cpp
@@ -52,6 +56,8 @@ ADD_EXECUTABLE(${BUILD_TARGET_NAME}
 #    src/server/webserver_libevent.cpp
     src/server/webserver_httplib.cpp
     src/storage/postgres_store.cpp
+    src/usage/sui_usage_client.cpp
+    src/usage/usage_service.cpp
     src/utils/base64/base64.cpp
     src/utils/codepage.cpp
     src/utils/file.cpp
@@ -62,7 +68,7 @@ ADD_EXECUTABLE(${BUILD_TARGET_NAME}
     src/utils/string.cpp
     src/utils/system.cpp
     src/utils/urlencode.cpp)
-TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE src)
+TARGET_INCLUDE_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE src "${CMAKE_BINARY_DIR}/generated")
 TARGET_LINK_DIRECTORIES(${BUILD_TARGET_NAME} PRIVATE ${CMAKE_SOURCE_DIR})
 
 FIND_PACKAGE(PkgConfig REQUIRED)

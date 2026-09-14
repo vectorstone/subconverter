@@ -7,6 +7,7 @@
 #include <libpq-fe.h>
 
 #include "utils/logger.h"
+#include "usage_schema.h"
 #include "postgres_store.h"
 
 namespace
@@ -153,6 +154,34 @@ CREATE INDEX IF NOT EXISTS short_links_expiry_idx ON short_links(expires_at);
     const bool ok = result_ok(result, PGRES_COMMAND_OK);
     if(!ok)
         writeLog(0, "PostgreSQL schema initialization failed: " + std::string(PQerrorMessage(connection_)), LOG_LEVEL_ERROR);
+    PQclear(result);
+    return ok;
+}
+
+bool PostgresStore::ensure_usage_schema()
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if(!connection_)
+        return false;
+    PGresult *result = PQexec(connection_, USAGE_SCHEMA_SQL);
+    bool ok = result_ok(result, PGRES_COMMAND_OK);
+    if(!ok)
+        writeLog(0, "PostgreSQL usage schema initialization failed: " + std::string(PQerrorMessage(connection_)), LOG_LEVEL_ERROR);
+    PQclear(result);
+    if(!ok)
+    {
+        exec_command(connection_, "ROLLBACK");
+        return false;
+    }
+    result = PQexec(connection_,
+        "SELECT b.id,b.owner_subject,b.provider_id,b.instance_id,b.client_id,b.identity_fingerprint,b.label,b.revision,b.created_at,b.updated_at,b.revoked_at,"
+        "c.binding_id,c.binding_revision,c.snapshot,c.observed_at,c.last_attempt_at,c.last_error_code,c.invalidated_at,"
+        "a.id,a.actor_subject,a.action,a.binding_id,a.owner_subject,a.provider_id,a.client_id,a.created_at,a.request_id,a.details "
+        "FROM shortlink_usage_bindings b LEFT JOIN shortlink_usage_cache c ON c.binding_id=b.id "
+        "LEFT JOIN shortlink_usage_audit a ON FALSE LIMIT 0");
+    ok = result_ok(result, PGRES_TUPLES_OK);
+    if(!ok)
+        writeLog(0, "PostgreSQL usage schema validation failed: " + std::string(PQerrorMessage(connection_)), LOG_LEVEL_ERROR);
     PQclear(result);
     return ok;
 }
@@ -515,4 +544,166 @@ bool PostgresStore::update_snapshot(const std::string &owner, const std::string 
     else
         exec_command(connection_, "ROLLBACK");
     return ok;
+}
+
+namespace
+{
+void fill_usage_binding(PGresult *result, int row, UsageBinding &item)
+{
+    item.id = result_value(result, row, 0);
+    item.owner_subject = result_value(result, row, 1);
+    item.provider_id = result_value(result, row, 2);
+    item.instance_id = result_value(result, row, 3);
+    item.client_id = result_value(result, row, 4);
+    item.identity_fingerprint = result_value(result, row, 5);
+    item.label = result_value(result, row, 6);
+    item.revision = result_value(result, row, 7);
+    item.created_at = parse_timestamp(result_value(result, row, 8));
+    item.observed_at = parse_timestamp(result_value(result, row, 9));
+    item.last_attempt_at = parse_timestamp(result_value(result, row, 10));
+    item.last_error_code = result_value(result, row, 11);
+    item.invalidated = result_value(result, row, 12) == "true";
+    item.snapshot_json = result_value(result, row, 13);
+}
+
+const char *usage_binding_columns =
+    "b.id::text,b.owner_subject,b.provider_id,b.instance_id::text,b.client_id::text,b.identity_fingerprint,b.label,b.revision::text,"
+    "EXTRACT(EPOCH FROM b.created_at)::bigint::text,COALESCE(EXTRACT(EPOCH FROM c.observed_at)::bigint::text,''),"
+    "COALESCE(EXTRACT(EPOCH FROM c.last_attempt_at)::bigint::text,''),COALESCE(c.last_error_code,''),(c.invalidated_at IS NOT NULL)::text,COALESCE(c.snapshot::text,'')";
+}
+
+bool PostgresStore::usage_user_exists(const std::string &owner)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    PGresult *result = nullptr;
+    const bool ok = connection_ && exec_params(connection_, "SELECT 1 FROM shortlink_users WHERE external_subject=$1", {owner.c_str()}, &result)
+        && PQntuples(result) == 1;
+    PQclear(result);
+    return ok;
+}
+
+bool PostgresStore::list_usage_bindings(const std::string &owner, bool all_owners, const std::string &cursor, int limit, std::vector<UsageBinding> &records)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if(!connection_)
+        return false;
+    const std::string limit_value = std::to_string(std::max(1, std::min(limit, 101)));
+    PGresult *result = nullptr;
+    const std::string select = std::string("SELECT ") + usage_binding_columns +
+        " FROM shortlink_usage_bindings b LEFT JOIN shortlink_usage_cache c ON c.binding_id=b.id AND c.binding_revision=b.revision WHERE b.revoked_at IS NULL ";
+    bool ok;
+    if(all_owners && owner.empty())
+        ok = exec_params(connection_, select + "AND b.id > COALESCE(NULLIF($1,''),'0')::bigint ORDER BY b.id LIMIT $2::integer", {cursor.c_str(), limit_value.c_str()}, &result);
+    else
+        ok = exec_params(connection_, select + "AND b.owner_subject=$1 AND b.id > COALESCE(NULLIF($2,''),'0')::bigint ORDER BY b.id LIMIT $3::integer", {owner.c_str(), cursor.c_str(), limit_value.c_str()}, &result);
+    if(ok)
+        for(int row = 0; row < PQntuples(result); ++row) { UsageBinding item; fill_usage_binding(result, row, item); records.push_back(std::move(item)); }
+    PQclear(result);
+    return ok;
+}
+
+bool PostgresStore::get_usage_binding(const std::string &id, UsageBinding &record)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    PGresult *result = nullptr;
+    const std::string sql = std::string("SELECT ") + usage_binding_columns +
+        " FROM shortlink_usage_bindings b LEFT JOIN shortlink_usage_cache c ON c.binding_id=b.id AND c.binding_revision=b.revision WHERE b.id::text=$1 AND b.revoked_at IS NULL";
+    const bool ok = connection_ && exec_params(connection_, sql, {id.c_str()}, &result);
+    if(ok && PQntuples(result) == 1)
+        fill_usage_binding(result, 0, record);
+    PQclear(result);
+    return ok && !record.id.empty();
+}
+
+bool PostgresStore::create_usage_binding(const UsageBinding &record, const std::string &actor, const std::string &request_id, int max_active, UsageBinding &created, std::string &error)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if(!connection_ || !exec_command(connection_, "BEGIN")) { error = "database"; return false; }
+    PGresult *result = nullptr;
+    bool ok = exec_params(connection_, "SELECT external_subject FROM shortlink_users WHERE external_subject=$1 FOR UPDATE", {record.owner_subject.c_str()}, &result) && PQntuples(result)==1;
+    PQclear(result);
+    if(!ok) error = "owner_not_found";
+    if(ok)
+    {
+        result = nullptr;
+        ok = exec_params(connection_, "SELECT COUNT(*)::text FROM shortlink_usage_bindings WHERE owner_subject=$1 AND revoked_at IS NULL", {record.owner_subject.c_str()}, &result);
+        if(ok && std::atoi(result_value(result,0,0).c_str()) >= max_active) { ok=false; error="limit"; }
+        PQclear(result);
+    }
+    if(ok)
+    {
+        result = nullptr;
+        ok = exec_params(connection_, "INSERT INTO shortlink_usage_bindings(owner_subject,provider_id,instance_id,client_id,identity_fingerprint,label) VALUES($1,$2,$3::uuid,$4::bigint,$5,$6) RETURNING id::text,revision::text,EXTRACT(EPOCH FROM created_at)::bigint::text",
+            {record.owner_subject.c_str(),record.provider_id.c_str(),record.instance_id.c_str(),record.client_id.c_str(),record.identity_fingerprint.c_str(),record.label.c_str()}, &result);
+        if(ok && PQntuples(result)==1) { created=record; created.id=result_value(result,0,0); created.revision=result_value(result,0,1); created.created_at=parse_timestamp(result_value(result,0,2)); }
+        else { ok=false; error = PQresultErrorField(result, PG_DIAG_SQLSTATE) && std::string(PQresultErrorField(result, PG_DIAG_SQLSTATE))=="23505" ? "conflict" : "database"; }
+        PQclear(result);
+    }
+    if(ok)
+    {
+        result=nullptr;
+        ok=exec_params(connection_, "INSERT INTO shortlink_usage_audit(actor_subject,action,binding_id,owner_subject,provider_id,client_id,request_id,details) VALUES($1,'create',$2::bigint,$3,$4,$5::bigint,$6,jsonb_build_object('label',$7::text,'revision',$8::text))",
+          {actor.c_str(),created.id.c_str(),created.owner_subject.c_str(),created.provider_id.c_str(),created.client_id.c_str(),request_id.c_str(),created.label.c_str(),created.revision.c_str()},&result);
+        PQclear(result);
+    }
+    if(ok) ok=exec_command(connection_,"COMMIT"); else exec_command(connection_,"ROLLBACK");
+    if(!ok && error.empty()) error="database";
+    return ok;
+}
+
+bool PostgresStore::rename_usage_binding(const std::string &id, const std::string &expected_revision, const std::string &label, const std::string &actor, const std::string &request_id, UsageBinding &updated, std::string &error)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if(!connection_ || !exec_command(connection_,"BEGIN")) { error="database"; return false; }
+    PGresult *result=nullptr;
+    bool ok=exec_params(connection_, "UPDATE shortlink_usage_bindings SET label=$3,revision=revision+1,updated_at=NOW() WHERE id::text=$1 AND revision::text=$2 AND revoked_at IS NULL RETURNING owner_subject,provider_id,instance_id::text,client_id::text,identity_fingerprint,revision::text,EXTRACT(EPOCH FROM created_at)::bigint::text", {id.c_str(),expected_revision.c_str(),label.c_str()}, &result);
+    if(ok && PQntuples(result)==1) { updated.id=id; updated.owner_subject=result_value(result,0,0); updated.provider_id=result_value(result,0,1); updated.instance_id=result_value(result,0,2); updated.client_id=result_value(result,0,3); updated.identity_fingerprint=result_value(result,0,4); updated.label=label; updated.revision=result_value(result,0,5); updated.created_at=parse_timestamp(result_value(result,0,6)); }
+    else { ok=false; error="precondition"; }
+    PQclear(result);
+    if(ok) { result=nullptr; ok=exec_params(connection_,"UPDATE shortlink_usage_cache SET binding_revision=$2::bigint WHERE binding_id=$1::bigint",{id.c_str(),updated.revision.c_str()},&result); PQclear(result); }
+    if(ok) { result=nullptr; ok=exec_params(connection_,"INSERT INTO shortlink_usage_audit(actor_subject,action,binding_id,owner_subject,provider_id,client_id,request_id,details) VALUES($1,'rename',$2::bigint,$3,$4,$5::bigint,$6,jsonb_build_object('label',$7::text,'revision',$8::text))",{actor.c_str(),id.c_str(),updated.owner_subject.c_str(),updated.provider_id.c_str(),updated.client_id.c_str(),request_id.c_str(),label.c_str(),updated.revision.c_str()},&result); PQclear(result); }
+    if(ok) ok=exec_command(connection_,"COMMIT"); else exec_command(connection_,"ROLLBACK");
+    if(!ok && error.empty()) error="database";
+    return ok;
+}
+
+bool PostgresStore::revoke_usage_binding(const std::string &id, const std::string &expected_revision, const std::string &actor, const std::string &request_id, std::string &error)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if(!connection_ || !exec_command(connection_,"BEGIN")) { error="database"; return false; }
+    PGresult *result=nullptr;
+    bool ok=exec_params(connection_,"UPDATE shortlink_usage_bindings SET revoked_at=NOW(),updated_at=NOW(),revision=revision+1 WHERE id::text=$1 AND revision::text=$2 AND revoked_at IS NULL RETURNING owner_subject,provider_id,client_id::text,label",{id.c_str(),expected_revision.c_str()},&result);
+    std::string owner,provider,client,label;
+    if(ok && PQntuples(result)==1) { owner=result_value(result,0,0); provider=result_value(result,0,1); client=result_value(result,0,2); label=result_value(result,0,3); } else { ok=false; error="precondition"; }
+    PQclear(result);
+    if(ok) { result=nullptr; ok=exec_params(connection_,"DELETE FROM shortlink_usage_cache WHERE binding_id=$1::bigint",{id.c_str()},&result); PQclear(result); }
+    if(ok) { result=nullptr; ok=exec_params(connection_,"INSERT INTO shortlink_usage_audit(actor_subject,action,binding_id,owner_subject,provider_id,client_id,request_id,details) VALUES($1,'revoke',$2::bigint,$3,$4,$5::bigint,$6,jsonb_build_object('label',$7::text,'revision',$8::text))",{actor.c_str(),id.c_str(),owner.c_str(),provider.c_str(),client.c_str(),request_id.c_str(),label.c_str(),expected_revision.c_str()},&result); PQclear(result); }
+    if(ok) ok=exec_command(connection_,"COMMIT"); else exec_command(connection_,"ROLLBACK");
+    if(!ok && error.empty()) error="database";
+    return ok;
+}
+
+bool PostgresStore::record_usage_success(const UsageBinding &expected, const std::string &snapshot_json, std::int64_t observed_at, std::int64_t attempted_at)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    std::string observed=std::to_string(observed_at), attempted=std::to_string(attempted_at);
+    PGresult *result=nullptr;
+    const bool ok=connection_ && exec_params(connection_, "INSERT INTO shortlink_usage_cache(binding_id,binding_revision,snapshot,observed_at,last_attempt_at,last_error_code,invalidated_at) SELECT b.id,b.revision,$6::jsonb,to_timestamp($7::double precision),to_timestamp($8::double precision),NULL,NULL FROM shortlink_usage_bindings b WHERE b.id::text=$1 AND b.revision::text=$2 AND b.instance_id::text=$3 AND b.identity_fingerprint=$4 AND b.client_id::text=$5 AND b.revoked_at IS NULL ON CONFLICT(binding_id) DO UPDATE SET binding_revision=EXCLUDED.binding_revision,snapshot=EXCLUDED.snapshot,observed_at=EXCLUDED.observed_at,last_attempt_at=EXCLUDED.last_attempt_at,last_error_code=NULL WHERE shortlink_usage_cache.invalidated_at IS NULL", {expected.id.c_str(),expected.revision.c_str(),expected.instance_id.c_str(),expected.identity_fingerprint.c_str(),expected.client_id.c_str(),snapshot_json.c_str(),observed.c_str(),attempted.c_str()}, &result);
+    const bool changed=ok && std::atoi(PQcmdTuples(result))==1; PQclear(result); return changed;
+}
+
+bool PostgresStore::record_usage_failure(const UsageBinding &expected, const std::string &error_code, std::int64_t attempted_at, bool invalidate)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    std::string attempted=std::to_string(attempted_at), invalid=invalidate?"1":"0";
+    PGresult *result=nullptr;
+    const bool ok=connection_ && exec_params(connection_, "INSERT INTO shortlink_usage_cache(binding_id,binding_revision,snapshot,observed_at,last_attempt_at,last_error_code,invalidated_at) SELECT b.id,b.revision,NULL,NULL,to_timestamp($6::double precision),$7,CASE WHEN $8='1' THEN NOW() ELSE NULL END FROM shortlink_usage_bindings b WHERE b.id::text=$1 AND b.revision::text=$2 AND b.instance_id::text=$3 AND b.identity_fingerprint=$4 AND b.client_id::text=$5 AND b.revoked_at IS NULL ON CONFLICT(binding_id) DO UPDATE SET last_attempt_at=EXCLUDED.last_attempt_at,last_error_code=EXCLUDED.last_error_code,snapshot=CASE WHEN $8='1' THEN NULL ELSE shortlink_usage_cache.snapshot END,observed_at=CASE WHEN $8='1' THEN NULL ELSE shortlink_usage_cache.observed_at END,invalidated_at=CASE WHEN $8='1' THEN NOW() ELSE shortlink_usage_cache.invalidated_at END WHERE shortlink_usage_cache.binding_revision=EXCLUDED.binding_revision", {expected.id.c_str(),expected.revision.c_str(),expected.instance_id.c_str(),expected.identity_fingerprint.c_str(),expected.client_id.c_str(),attempted.c_str(),error_code.c_str(),invalid.c_str()}, &result);
+    const bool changed=ok && std::atoi(PQcmdTuples(result))==1; PQclear(result); return changed;
+}
+
+bool PostgresStore::cleanup_usage_audit(int retention_days)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    std::string days=std::to_string(std::max(retention_days,1)); PGresult *result=nullptr;
+    bool ok=connection_ && exec_params(connection_,"DELETE FROM shortlink_usage_audit WHERE created_at < NOW()-make_interval(days=>$1::integer)",{days.c_str()},&result); PQclear(result); return ok;
 }

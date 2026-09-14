@@ -149,7 +149,7 @@
     "mtu": 9000, "stack": "mixed",
     "auto_route": true,
     "dns_mode": "hijack",
-    "dns_address": ["172.19.0.2", "fdfe:dcba:9876::2"] }   // 1.14+；旧客户端报未知字段
+    "dns_address": ["<TUN_PEER_IP>", "<TUN_PEER_IP6>"] }   // 1.14+；旧客户端报未知字段
 ]
 // ⚠ 删掉：route.auto_detect_interface、strict_route、include_*/exclude_*、
 //          以及 route.rules 里所有 process_*/user*/package_* 条件
@@ -164,7 +164,7 @@
     "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
     "mtu": 8500, "stack": "mixed",
     "auto_route": true,
-    "dns_mode": "hijack", "dns_address": ["172.19.0.2", "fdfe:dcba:9876::2"] }
+    "dns_mode": "hijack", "dns_address": ["<TUN_PEER_IP>", "<TUN_PEER_IP6>"] }
 ],
 "route": { "override_android_vpn": true }   // 让 TUN 把 Android VPN 当上游
 // ⚠ 删掉：interface_name、gso（历史字段）、include_uid、include_interface、

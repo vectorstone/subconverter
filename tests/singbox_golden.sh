@@ -20,7 +20,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SINGBOX_BIN="${1:-$(command -v sing-box || true)}"
-BIN="$ROOT/build/subconverter"
+BIN="${SINGBOX_TEST_BINARY:-$ROOT/build/subconverter}"
 PORT="${SINGBOX_TEST_PORT:-25519}"
 FIXTURE_PORT="${SINGBOX_TEST_FIXTURE_PORT:-18899}"
 WORK="$(mktemp -d)"
@@ -40,7 +40,8 @@ pass() { echo "  ok: $*"; }
 
 # The binary chdir()s into its own directory, so relative preference paths resolve
 # against build/.
-[[ -e "$ROOT/build/base" ]] || ln -s "$ROOT/base" "$ROOT/build/base"
+BIN_DIR="$(cd "$(dirname "$BIN")" && pwd)"
+[[ -e "$BIN_DIR/base" ]] || ln -s "$ROOT/base" "$BIN_DIR/base"
 cp "$ROOT/base/pref.example.toml" "$WORK/pref.toml"
 # the api port is read from the preference file, not from an environment variable
 sed -i.bak "s/^port = 25500$/port = $PORT/" "$WORK/pref.toml" && rm -f "$WORK/pref.toml.bak"
@@ -58,7 +59,7 @@ pushd "$FIXTURES" >/dev/null
 python3 -m http.server "$FIXTURE_PORT" >/dev/null 2>&1 &
 FIXTURE_PID=$!
 popd >/dev/null
-pushd "$ROOT/build" >/dev/null
+pushd "$BIN_DIR" >/dev/null
 "./subconverter" -f "$WORK/pref.toml" >"$WORK/converter.log" 2>&1 &
 CONVERTER_PID=$!
 popd >/dev/null

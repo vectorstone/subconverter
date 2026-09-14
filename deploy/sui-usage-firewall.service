@@ -1,0 +1,13 @@
+[Unit]
+Description=Restrict s-ui usage adapter to the shortlink server
+Before=sui-usage-adapter.service
+After=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/usr/sbin/nft delete table inet sui_usage_guard
+ExecStart=/usr/sbin/nft -f /etc/sui-usage-adapter/firewall.nft
+
+[Install]
+WantedBy=multi-user.target

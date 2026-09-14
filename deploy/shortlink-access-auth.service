@@ -1,0 +1,22 @@
+[Unit]
+Description=SubConverter Cloudflare Access origin verifier
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStart=/usr/local/bin/shortlink-access-auth -config /run/credentials/shortlink-access-auth.service/config.json
+LoadCredential=config.json:/etc/subconverter-access-auth/config.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

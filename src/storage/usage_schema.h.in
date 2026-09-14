@@ -1,0 +1,6 @@
+#ifndef USAGE_SCHEMA_H_INCLUDED
+#define USAGE_SCHEMA_H_INCLUDED
+
+static constexpr const char *USAGE_SCHEMA_SQL = R"USAGESQL(@USAGE_SCHEMA_SQL@)USAGESQL";
+
+#endif

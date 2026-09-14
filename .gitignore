@@ -9,3 +9,4 @@ temp/
 .omc/
 .sensitive-patterns
 .xmake
+build-*/

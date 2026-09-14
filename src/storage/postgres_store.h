@@ -8,6 +8,8 @@
 
 #include <libpq-fe.h>
 
+#include "usage/usage_types.h"
+
 struct ShortLinkRecord
 {
     std::string id;
@@ -43,6 +45,7 @@ public:
 
     bool open(const std::string &connection_string);
     bool ensure_schema();
+    bool ensure_usage_schema();
     bool ready() const;
 
     bool ensure_user(const std::string &owner, const std::string &email = "", const std::string &role = "user");
@@ -61,6 +64,16 @@ public:
     bool get_download_sequence(const ShortLinkRecord &record, int &sequence);
     bool revoke_short_link(const std::string &owner, const std::string &id, bool all_owners = false);
     bool update_snapshot(const std::string &owner, const std::string &id, const std::string &snapshot_payload, const std::string &response_headers, const std::string &content_hash, std::int64_t updated_at);
+
+    bool usage_user_exists(const std::string &owner);
+    bool list_usage_bindings(const std::string &owner, bool all_owners, const std::string &cursor, int limit, std::vector<UsageBinding> &records);
+    bool get_usage_binding(const std::string &id, UsageBinding &record);
+    bool create_usage_binding(const UsageBinding &record, const std::string &actor, const std::string &request_id, int max_active, UsageBinding &created, std::string &error);
+    bool rename_usage_binding(const std::string &id, const std::string &expected_revision, const std::string &label, const std::string &actor, const std::string &request_id, UsageBinding &updated, std::string &error);
+    bool revoke_usage_binding(const std::string &id, const std::string &expected_revision, const std::string &actor, const std::string &request_id, std::string &error);
+    bool record_usage_success(const UsageBinding &expected, const std::string &snapshot_json, std::int64_t observed_at, std::int64_t attempted_at);
+    bool record_usage_failure(const UsageBinding &expected, const std::string &error_code, std::int64_t attempted_at, bool invalidate);
+    bool cleanup_usage_audit(int retention_days);
 
 private:
     PGconn *connection_ = nullptr;
