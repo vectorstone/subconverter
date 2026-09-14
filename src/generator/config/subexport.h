@@ -9,6 +9,7 @@
 
 #include "config/proxygroup.h"
 #include "config/regmatch.h"
+#include "generator/config/singbox.h"
 #include "parser/config/proxy.h"
 #include "utils/ini_reader/ini_reader.h"
 #include "utils/string.h"
@@ -41,6 +42,13 @@ struct extra_settings
     std::string clash_proxies_style = "flow";
     std::string clash_proxy_groups_style = "flow";
     bool authorized = false;
+
+    /// sing-box generation
+    bool singbox_generated = true;            // build the skeleton in C++ instead of rendering a template
+    bool singbox_chain_strict = false;        // fail the request instead of dropping invalid chains
+    std::string singbox_platform;             // resolved platform name, empty = use settings default
+    std::vector<std::string> singbox_chain_errors;
+    singbox::Settings singbox_settings;
 
     extra_settings() = default;
     extra_settings(const extra_settings&) = delete;

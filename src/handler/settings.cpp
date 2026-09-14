@@ -379,6 +379,8 @@ void readYAMLConf(YAML::Node &node)
         section["clash_proxies_style"] >> global.clashProxiesStyle;
         section["clash_proxy_groups_style"] >> global.clashProxyGroupsStyle;
         section["singbox_add_clash_modes"] >> global.singBoxAddClashModes;
+        section["singbox_default_platform"] >> global.singBoxDefaultPlatform;
+        section["singbox_chain_strict"] >> global.singBoxChainStrict;
     }
 
     if(section["rename_node"].IsSequence())
@@ -646,7 +648,9 @@ void readTOMLConf(toml::value &root)
                   "clash_use_new_field_name", global.clashUseNewField,
                   "clash_proxies_style", global.clashProxiesStyle,
                   "clash_proxy_groups_style", global.clashProxyGroupsStyle,
-                  "singbox_add_clash_modes", global.singBoxAddClashModes
+                  "singbox_add_clash_modes", global.singBoxAddClashModes,
+                  "singbox_default_platform", global.singBoxDefaultPlatform,
+                  "singbox_chain_strict", global.singBoxChainStrict
     );
 
     auto renameconfs = toml::find_or<std::vector<toml::value>>(section_node_pref, "rename_node", {});
@@ -901,6 +905,8 @@ void readConf()
         ini.get_if_exist("clash_proxies_style", global.clashProxiesStyle);
         ini.get_if_exist("clash_proxy_groups_style", global.clashProxyGroupsStyle);
         ini.get_bool_if_exist("singbox_add_clash_modes", global.singBoxAddClashModes);
+        ini.get_if_exist("singbox_default_platform", global.singBoxDefaultPlatform);
+        ini.get_bool_if_exist("singbox_chain_strict", global.singBoxChainStrict);
         if(ini.item_prefix_exist("rename_node"))
         {
             ini.get_all("rename_node", tempArray);

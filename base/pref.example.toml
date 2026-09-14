@@ -145,7 +145,14 @@ clash_proxies_style = "flow"
 clash_proxy_groups_style = "block"
 
 # add Clash mode to sing-box rules, and add a GLOBAL group to end of outbounds
+# Add GLOBAL / DIRECT clash mode selectors and rules
 singbox_add_clash_modes = true
+# Default platform for target=singbox when &singbox_platform= is omitted:
+# macos | windows | linux | android | ios | openwrt
+singbox_default_platform = "macos"
+# Reject requests whose chained proxy (detour) declarations are invalid instead of
+# dropping them with a warning
+singbox_chain_strict = false
 
 [[node_pref.rename_node]]
 match = '\(?((x|X)?(\d+)(\.?\d+)?)((\s?倍率?)|(x|X))\)?'

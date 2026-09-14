@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <string>
 
 #include "handler/settings.h"
@@ -470,54 +471,107 @@ void rulesetToSurge(INIReader &base_rule, std::vector<RulesetContent> &ruleset_c
     }
 }
 
-static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &args, const std::string& rule, const std::string &group, rapidjson::MemoryPoolAllocator<>& allocator)
+static void registerRuleSet(std::vector<singbox::RuleSetSpec> &rule_sets, const std::string &tag, bool geoip)
 {
+    singbox::RuleSetSpec spec;
+    spec.tag = tag;
+    spec.geoip = geoip;
+    if(std::find(rule_sets.begin(), rule_sets.end(), spec) == rule_sets.end())
+        rule_sets.push_back(spec);
+}
+
+static bool isRejectGroup(const std::string &group)
+{
+    return toUpper(trim(group)) == "REJECT";
+}
+
+static void applySingBoxTarget(rapidjson::Value &rule_obj, const std::string &group, rapidjson::MemoryPoolAllocator<> &allocator)
+{
+    using namespace rapidjson_ext;
+    if(isRejectGroup(group))
+    {
+        rule_obj | AddMemberOrReplace("action", rapidjson::Value("reject", allocator), allocator);
+        return;
+    }
+    rule_obj | AddMemberOrReplace("action", rapidjson::Value("route", allocator), allocator);
+    rule_obj | AddMemberOrReplace("outbound", rapidjson::Value(group.c_str(), allocator), allocator);
+}
+
+static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &args, const std::string& rule, const std::string &group, rapidjson::MemoryPoolAllocator<>& allocator, std::vector<singbox::RuleSetSpec> &rule_sets, bool &is_final, std::string &final_group)
+{
+    using namespace rapidjson_ext;
     args.clear();
     split(args, rule, ',');
     if (args.size() < 2) return rapidjson::Value(rapidjson::kObjectType);
-    auto type = toLower(std::string(args[0]));
-    auto value = toLower(std::string(args[1]));
+    const std::string raw_type = trim(std::string(args[0]));
+    const std::string value = trim(std::string(args[1]));
 //    std::string_view option;
 //    if (args.size() >= 3) option = args[2];
 
-    rapidjson::Value rule_obj(rapidjson::kObjectType);
-    type = replaceAllDistinct(type, "-", "_");
-    type = replaceAllDistinct(type, "ip_cidr6", "ip_cidr");
-    type = replaceAllDistinct(type, "src_", "source_");
-    if (type == "match" || type == "final")
+    const std::string upper_type = toUpper(raw_type);
+    if (upper_type == "MATCH" || upper_type == "FINAL")
     {
-        rule_obj.AddMember("outbound", rapidjson::Value(value.data(), value.size(), allocator), allocator);
+        is_final = true;
+        final_group = (!value.empty() && !isRejectGroup(value)) ? value : group;
+        return rapidjson::Value(rapidjson::kObjectType);
+    }
+
+    rapidjson::Value rule_obj(rapidjson::kObjectType);
+
+    std::string rule_set_tag;
+    bool geoip = false;
+    if (singbox::ruleTypeToRuleSetTag(upper_type, value, rule_set_tag, geoip))
+    {
+        rapidjson::Value refs(rapidjson::kArrayType);
+        refs.PushBack(rapidjson::Value(rule_set_tag.c_str(), allocator), allocator);
+        rule_obj.AddMember("rule_set", refs, allocator);
+        registerRuleSet(rule_sets, rule_set_tag, geoip);
     }
     else
     {
-        rule_obj.AddMember(rapidjson::Value(type.c_str(), allocator), rapidjson::Value(value.data(), value.size(), allocator), allocator);
-        rule_obj.AddMember("outbound", rapidjson::Value(group.c_str(), allocator), allocator);
+        std::string key = toLower(raw_type);
+        key = replaceAllDistinct(key, "-", "_");
+        key = replaceAllDistinct(key, "ip_cidr6", "ip_cidr");
+        key = replaceAllDistinct(key, "src_", "source_");
+        /// Rule values are kept verbatim: process_name / process_path / package_name /
+        /// domain_regex are case sensitive.
+        rule_obj.AddMember(rapidjson::Value(key.c_str(), allocator), rapidjson::Value(value.c_str(), allocator), allocator);
     }
+    applySingBoxTarget(rule_obj, group, allocator);
     return rule_obj;
 }
 
-static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Value &rules, const std::string& rule, rapidjson::MemoryPoolAllocator<>& allocator)
+static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Value &rules, const std::string& rule, rapidjson::MemoryPoolAllocator<>& allocator, std::vector<singbox::RuleSetSpec> &rule_sets)
 {
     using namespace rapidjson_ext;
     args.clear();
     split(args, rule, ',');
     if (args.size() < 2) return;
-    auto type = args[0];
+    const std::string raw_type = trim(std::string(args[0]));
+    const std::string value = trim(std::string(args[1]));
 //    std::string_view option;
 //    if (args.size() >= 3) option = args[2];
 
-    if (none_of(SingBoxRuleTypes, [&](const std::string& t){ return type == t; }))
+    if (none_of(SingBoxRuleTypes, [&](const std::string& t){ return raw_type == t; }))
         return;
 
-    auto realType = toLower(std::string(type));
-    auto value = toLower(std::string(args[1]));
+    std::string rule_set_tag;
+    bool geoip = false;
+    if (singbox::ruleTypeToRuleSetTag(raw_type, value, rule_set_tag, geoip))
+    {
+        rules | AppendToArray("rule_set", rapidjson::Value(rule_set_tag.c_str(), allocator), allocator);
+        registerRuleSet(rule_sets, rule_set_tag, geoip);
+        return;
+    }
+
+    auto realType = toLower(raw_type);
     realType = replaceAllDistinct(realType, "-", "_");
     realType = replaceAllDistinct(realType, "ip_cidr6", "ip_cidr");
 
-    rules | AppendToArray(realType.c_str(), rapidjson::Value(value.c_str(), value.size(), allocator), allocator);
+    rules | AppendToArray(realType.c_str(), rapidjson::Value(value.c_str(), allocator), allocator);
 }
 
-void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules)
+void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, const singbox::Settings &settings, std::vector<singbox::RuleSetSpec> &rule_sets)
 {
     using namespace rapidjson_ext;
     std::string rule_group, retrieved_rules, strLine, final;
@@ -526,22 +580,8 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
     auto &allocator = base_rule.GetAllocator();
 
     rapidjson::Value rules(rapidjson::kArrayType);
-    if (!overwrite_original_rules)
-    {
-        if (base_rule.HasMember("route") && base_rule["route"].HasMember("rules") && base_rule["route"]["rules"].IsArray())
-            rules.Swap(base_rule["route"]["rules"]);
-    }
-
-    auto dns_object = buildObject(allocator, "protocol", "dns", "outbound", "dns-out");
-    rules.PushBack(dns_object, allocator);
-
-    if (global.singBoxAddClashModes)
-    {
-        auto global_object = buildObject(allocator, "clash_mode", "Global", "outbound", "GLOBAL");
-        auto direct_object = buildObject(allocator, "clash_mode", "Direct", "outbound", "DIRECT");
-        rules.PushBack(global_object, allocator);
-        rules.PushBack(direct_object, allocator);
-    }
+    if (!overwrite_original_rules && base_rule.HasMember("route") && base_rule["route"].IsObject() && base_rule["route"].HasMember("rules") && base_rule["route"]["rules"].IsArray())
+        rules.Swap(base_rule["route"]["rules"]);
 
     std::vector<std::string_view> temp(4);
     for(RulesetContent &x : ruleset_content_array)
@@ -558,12 +598,17 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
         if(startsWith(retrieved_rules, "[]"))
         {
             strLine = retrieved_rules.substr(2);
-            if(startsWith(strLine, "FINAL") || startsWith(strLine, "MATCH"))
+            bool is_final = false;
+            std::string final_group;
+            rapidjson::Value rule_obj = transformRuleToSingBox(temp, strLine, rule_group, allocator, rule_sets, is_final, final_group);
+            if(is_final)
             {
-                final = rule_group;
+                final = final_group;
                 continue;
             }
-            rules.PushBack(transformRuleToSingBox(temp, strLine, rule_group, allocator), allocator);
+            if(rule_obj.ObjectEmpty())
+                continue;
+            rules.PushBack(rule_obj, allocator);
             total_rules++;
             continue;
         }
@@ -589,18 +634,24 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
                 strLine.erase(strLine.find("//"));
                 strLine = trimWhitespace(strLine);
             }
-            appendSingBoxRule(temp, rule, strLine, allocator);
+            appendSingBoxRule(temp, rule, strLine, allocator, rule_sets);
         }
         if (rule.ObjectEmpty()) continue;
-        rule.AddMember("outbound", rapidjson::Value(rule_group.c_str(), allocator), allocator);
+        applySingBoxTarget(rule, rule_group, allocator);
         rules.PushBack(rule, allocator);
     }
 
     if (!base_rule.HasMember("route"))
         base_rule.AddMember("route", rapidjson::Value(rapidjson::kObjectType), allocator);
 
-    auto finalValue = rapidjson::Value(final.c_str(), allocator);
-    base_rule["route"]
-    | AddMemberOrReplace("rules", rules, allocator)
-    | AddMemberOrReplace("final", finalValue, allocator);
+    base_rule["route"] | AddMemberOrReplace("rules", rules, allocator);
+
+    if(!final.empty())
+        base_rule["route"] | AddMemberOrReplace("final", rapidjson::Value(final.c_str(), allocator), allocator);
+    else
+    {
+        const bool has_final = base_rule["route"].HasMember("final") && base_rule["route"]["final"].IsString() && base_rule["route"]["final"].GetStringLength() > 0;
+        if(!has_final && !settings.proxy_tag.empty())
+            base_rule["route"] | AddMemberOrReplace("final", rapidjson::Value(settings.proxy_tag.c_str(), allocator), allocator);
+    }
 }

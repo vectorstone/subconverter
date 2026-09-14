@@ -524,6 +524,56 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     if(!argExpandRulesets)
         ext.managed_config_prefix = global.managedConfigPrefix;
 
+    /// sing-box platform and generation settings
+    {
+        std::string argPlatform = getUrlArg(argument, "singbox_platform");
+        if(argPlatform.empty())
+            argPlatform = getUrlArg(argument, "platform");
+        if(argPlatform.empty())
+            argPlatform = global.singBoxDefaultPlatform;
+
+        singbox::Platform platform = singbox::Platform::MacOS;
+        if(!singbox::parsePlatform(argPlatform, platform))
+        {
+            *status_code = 400;
+            return "Invalid singbox_platform: '" + argPlatform + "', expected one of " + singbox::platformList();
+        }
+
+        singbox::Settings &sb = ext.singbox_settings;
+        ext.singbox_platform = singbox::platformName(platform);
+        sb.platform = platform;
+        sb.ipv6 = getUrlArg(argument, "singbox_ipv6") == "1";
+        sb.clash_modes = global.singBoxAddClashModes;
+
+        std::string sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_dns_direct")).empty())
+            sb.dns_direct_server = sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_dns_proxy")).empty())
+            sb.dns_proxy_server = sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_dns_ruleset")).empty())
+            sb.dns_direct_ruleset = sbArg;
+        else if(getUrlArg(argument, "singbox_dns_split") == "0")
+            sb.dns_direct_ruleset.clear();
+        if(!(sbArg = getUrlArg(argument, "singbox_ruleset_dir")).empty())
+            sb.local_ruleset_dir = sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_cache_path")).empty())
+            sb.cache_path = sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_clash_api")).empty())
+            sb.clash_api_controller = sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_clash_api_secret")).empty())
+            sb.clash_api_secret = sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_ruleset_source")).empty())
+        {
+            const std::string source = toLower(sbArg);
+            if(source == "local")
+                sb.ruleset_source = 1;
+            else if(source == "remote")
+                sb.ruleset_source = 0;
+        }
+        ext.singbox_chain_strict = getUrlArg(argument, "singbox_chain_strict") == "1" || global.singBoxChainStrict;
+        ext.singbox_generated = true;
+    }
+
     /// load external configuration
     if(argExternalConfig.empty())
     {
@@ -552,7 +602,10 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
                     checkExternalBase(extconf.quan_rule_base, lQuanBase);
                     checkExternalBase(extconf.quanx_rule_base, lQuanXBase);
                     checkExternalBase(extconf.loon_rule_base, lLoonBase);
+                    const std::string previousSingBoxBase = lSingBoxBase;
                     checkExternalBase(extconf.singbox_rule_base, lSingBoxBase);
+                    if(lSingBoxBase != previousSingBoxBase)
+                        ext.singbox_generated = false;
 
                     if(!extconf.surge_ruleset.empty())
                         lCustomRulesets = extconf.surge_ruleset;
@@ -1060,7 +1113,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         break;
     case "singbox"_hash:
         writeLog(0, "Generate target: sing-box", LOG_LEVEL_INFO);
-        if(!ext.nodelist)
+        if(!ext.nodelist && !ext.singbox_generated)
         {
             if(render_template(fetchFile(lSingBoxBase, proxy, global.cacheConfig), tpl_args, base_content, global.templatePath) != 0)
             {
@@ -1070,6 +1123,15 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
         }
 
         output_content = proxyToSingBox(nodes, base_content, lRulesetContent, lCustomProxyGroups, ext);
+
+        if(ext.singbox_chain_strict && !ext.singbox_chain_errors.empty())
+        {
+            *status_code = 400;
+            std::string message = "Invalid sing-box chain configuration:\n";
+            for(const std::string &line : ext.singbox_chain_errors)
+                message += "  - " + line + "\n";
+            return message;
+        }
 
         if(argUpload)
             uploadGist("singbox", argUploadPath, output_content, false);
