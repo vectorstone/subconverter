@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "providers": [{
+    "provider_id": "sui-primary",
+    "label": "S-UI",
+    "endpoint": "https://192.0.2.10:8443",
+    "ca_file": "/run/usage/ca.crt",
+    "client_cert_file": "/run/usage/client.crt",
+    "client_key_file": "/run/usage/client.key"
+  }]
+}

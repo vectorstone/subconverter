@@ -1,0 +1,12 @@
+services:
+    subconverter:
+        environment:
+            SHORTLINK_USAGE_ENABLED: ${SHORTLINK_USAGE_ENABLED:-false}
+            SHORTLINK_USAGE_PROVIDERS_FILE: /run/usage/providers.json
+            SHORTLINK_USAGE_POLL_SECONDS: ${SHORTLINK_USAGE_POLL_SECONDS:-30}
+            SHORTLINK_USAGE_FRESH_SECONDS: ${SHORTLINK_USAGE_FRESH_SECONDS:-60}
+            SHORTLINK_USAGE_STALE_SECONDS: ${SHORTLINK_USAGE_STALE_SECONDS:-900}
+            SHORTLINK_USAGE_AUDIT_DAYS: ${SHORTLINK_USAGE_AUDIT_DAYS:-90}
+            SHORTLINK_PORTAL_ORIGIN: ${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}
+        volumes:
+            - ${SHORTLINK_USAGE_CONFIG_DIR:-/opt/subconverter/usage}:/run/usage:ro

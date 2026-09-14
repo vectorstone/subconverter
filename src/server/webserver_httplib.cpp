@@ -1,5 +1,6 @@
 #include <string>
 #include <cctype>
+#include <cstdlib>
 #ifdef MALLOC_TRIM
 #include <malloc.h>
 #endif // MALLOC_TRIM
@@ -94,14 +95,26 @@ static httplib::Server::Handler makeHandler(const responseRoute &rr)
     };
 }
 
-static std::string dump(const httplib::Headers &headers)
+static bool is_usage_path(const std::string &path)
+{
+    return path == "/api/usage" || startsWith(path, "/api/admin/usage-");
+}
+
+static bool sensitive_header(const std::string &name)
+{
+    const std::string lower = toLower(name);
+    return lower == "authorization" || lower == "x-api-key" || lower == "cookie"
+        || lower == "cf-access-jwt-assertion" || lower == "cf-access-authenticated-user-email";
+}
+
+static std::string dump(const httplib::Headers &headers, bool redact)
 {
     std::string s;
     for (auto &x: headers)
     {
         if (startsWith(x.first, "LOCAL_") || startsWith(x.first, "REMOTE_"))
             continue;
-        s += x.first + ": " + x.second + "|";
+        s += x.first + ": " + (redact && sensitive_header(x.first) ? "[REDACTED]" : x.second) + "|";
     }
     return s;
 }
@@ -133,6 +146,22 @@ int WebServer::start_web_server_multi(listener_args *args)
     server.Options(R"(.*)", [&](const httplib::Request &req, httplib::Response &res)
     {
         auto path = req.path;
+        if(is_usage_path(path))
+        {
+            const char *configured = std::getenv("SHORTLINK_PORTAL_ORIGIN");
+            const std::string origin = req.get_header_value("Origin");
+            if(!configured || origin.empty() || origin != configured)
+            {
+                res.status = 403;
+                return;
+            }
+            res.status = 204;
+            res.set_header("Access-Control-Allow-Origin", origin);
+            res.set_header("Vary", "Origin");
+            res.set_header("Access-Control-Allow-Methods", path == "/api/usage" ? "GET" : "GET,POST,DELETE");
+            res.set_header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-API-Key,If-Match,X-Request-ID");
+            return;
+        }
         std::string allowed;
         for (auto &rr : responses)
         {
@@ -158,7 +187,7 @@ int WebServer::start_web_server_multi(listener_args *args)
     {
         writeLog(0, "Accept connection from client " + req.remote_addr + ":" + std::to_string(req.remote_port), LOG_LEVEL_DEBUG);
         writeLog(0, "handle_cmd:    " + req.method + " handle_uri:    " + req.target, LOG_LEVEL_VERBOSE);
-        writeLog(0, "handle_header: " + dump(req.headers), LOG_LEVEL_VERBOSE);
+        writeLog(0, "handle_header: " + dump(req.headers, true), LOG_LEVEL_VERBOSE);
 
         if (req.has_header("SubConverter-Request") && !is_short_link_path(req.path))
         {
@@ -180,11 +209,22 @@ int WebServer::start_web_server_multi(listener_args *args)
             }
         }
         res.set_header("X-Client-IP", req.remote_addr);
-        if (req.has_header("Access-Control-Request-Headers"))
+        if (req.has_header("Access-Control-Request-Headers") && !is_usage_path(req.path))
         {
             res.set_header("Access-Control-Allow-Headers", req.get_header_value("Access-Control-Request-Headers"));
         }
-        res.set_header("Access-Control-Allow-Origin", "*");
+        if(!is_usage_path(req.path))
+            res.set_header("Access-Control-Allow-Origin", "*");
+        else
+        {
+            const char *configured = std::getenv("SHORTLINK_PORTAL_ORIGIN");
+            const std::string origin = req.get_header_value("Origin");
+            if(configured && !origin.empty() && origin == configured)
+            {
+                res.set_header("Access-Control-Allow-Origin", origin);
+                res.set_header("Vary", "Origin");
+            }
+        }
         return httplib::Server::HandlerResponse::Unhandled;
     });
     for (auto &x : redirect_map)

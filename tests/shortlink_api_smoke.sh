@@ -36,7 +36,7 @@ list_response=$(curl -fsS --max-time 10 -H "X-API-Key: ${API_KEY}" "${BASE_URL}/
 download_url=$(python3 -c 'import json,sys; data=json.load(sys.stdin); print(next(item["download_url"] for item in data["items"] if item["id"] == sys.argv[1]))' "${id}" <<<"${list_response}")
 download_headers=$(curl -fsS --max-time 20 -D - -o /dev/null "${download_url}")
 grep -Eiq 'Content-Disposition: attachment; filename="custom-clash-[0-9]{6}(-[0-9]+)?\.yaml"' <<<"${download_headers}"
-refresh_response=$(curl -fsS --max-time 30 -X POST -H "X-API-Key: ${API_KEY}" "${BASE_URL}/api/short-links/${id}/refresh")
+refresh_response=$(curl -fsS --max-time 30 -X POST --data '' -H "X-API-Key: ${API_KEY}" "${BASE_URL}/api/short-links/${id}/refresh")
 grep -q 'refreshed' <<<"${refresh_response}"
 refreshed_snapshot=$(curl -fsS --max-time 20 "${url}")
 grep -q 'smoke' <<<"${refreshed_snapshot}"

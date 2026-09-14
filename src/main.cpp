@@ -11,6 +11,7 @@
 #include "handler/webget.h"
 #include "handler/settings.h"
 #include "handler/shortlink_api.h"
+#include "handler/usage_api.h"
 #include "script/cron.h"
 #include "server/socket.h"
 #include "server/webserver.h"
@@ -181,6 +182,8 @@ int main(int argc, char *argv[])
     if(global.generatorMode)
         return simpleGenerator();
 
+    initializeUsageService();
+
     /*
     webServer.append_response("GET", "/", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {
@@ -276,6 +279,13 @@ int main(int argc, char *argv[])
     webServer.append_response("DELETE", R"(/api/keys/[0-9]+)", "application/json;charset=utf-8", revokeShortLinkApiKey);
     webServer.append_response("GET", "/api/admin/users", "application/json;charset=utf-8", listShortLinkUsers);
     webServer.append_response("POST", "/api/admin/users", "application/json;charset=utf-8", upsertShortLinkUser);
+    webServer.append_response("GET", "/api/usage", "application/json;charset=utf-8", getUsage);
+    webServer.append_response("GET", "/api/admin/usage-providers", "application/json;charset=utf-8", listUsageProviders);
+    webServer.append_response("GET", "/api/admin/usage-bindings", "application/json;charset=utf-8", listUsageBindings);
+    webServer.append_response("POST", "/api/admin/usage-bindings/preview", "application/json;charset=utf-8", previewUsageBinding);
+    webServer.append_response("POST", "/api/admin/usage-bindings", "application/json;charset=utf-8", createUsageBinding);
+    webServer.append_response("POST", R"(/api/admin/usage-bindings/[0-9]+)", "application/json;charset=utf-8", renameUsageBinding);
+    webServer.append_response("DELETE", R"(/api/admin/usage-bindings/[0-9]+)", "application/json;charset=utf-8", revokeUsageBinding);
     webServer.append_response("GET", R"(/s/[A-Za-z0-9_-]{24})", "text/yaml;charset=utf-8", getShortLink);
     webServer.append_response("HEAD", R"(/s/[A-Za-z0-9_-]{24})", "text/yaml;charset=utf-8", getShortLink);
 
@@ -314,6 +324,7 @@ int main(int argc, char *argv[])
     //std::cout<<"Serving HTTP @ http://"<<listen_address<<":"<<listen_port<<std::endl;
     writeLog(0, "Startup completed. Serving HTTP @ http://" + global.listenAddress + ":" + std::to_string(global.listenPort), LOG_LEVEL_INFO);
     webServer.start_web_server_multi(&args);
+    shutdownUsageService();
 
 #ifdef _WIN32
     WSACleanup();

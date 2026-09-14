@@ -1,0 +1,9 @@
+# Replace 198.51.100.10 with the shortlink server's verified egress IPv4.
+# This table only filters the new adapter port; it does not alter s-ui or SSH.
+table inet sui_usage_guard {
+    chain input {
+        type filter hook input priority -9; policy accept;
+        iifname != "lo" tcp dport 8443 ip saddr != 198.51.100.10 drop
+        iifname != "lo" meta nfproto ipv6 tcp dport 8443 drop
+    }
+}

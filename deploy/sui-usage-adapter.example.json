@@ -1,0 +1,11 @@
+{
+  "listen_addr": "0.0.0.0:8443",
+  "sui_api_base_url": "http://127.0.0.1:2095/app/apiv2",
+  "sui_token_file": "/run/credentials/sui-usage-adapter.service/sui-token",
+  "instance_id": "REPLACE_WITH_NEW_UUID",
+  "identity_hmac_key_file": "/run/credentials/sui-usage-adapter.service/identity.key",
+  "tls_cert_file": "/run/credentials/sui-usage-adapter.service/server.crt",
+  "tls_key_file": "/run/credentials/sui-usage-adapter.service/server.key",
+  "client_ca_file": "/run/credentials/sui-usage-adapter.service/ca.crt",
+  "allowed_client_identity": "spiffe://subconverter/usage-client"
+}

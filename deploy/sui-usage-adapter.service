@@ -1,0 +1,30 @@
+[Unit]
+Description=Read-only s-ui usage adapter
+After=network-online.target s-ui.service sui-usage-firewall.service
+Wants=network-online.target
+Requires=sui-usage-firewall.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStart=/usr/local/bin/sui-usage-adapter -config /run/credentials/sui-usage-adapter.service/config.json
+LoadCredential=config.json:/etc/sui-usage-adapter/config.json
+LoadCredential=sui-token:/etc/sui-usage-adapter/sui-api-token
+LoadCredential=identity.key:/etc/sui-usage-adapter/identity.key
+LoadCredential=server.crt:/etc/sui-usage-adapter/server.crt
+LoadCredential=server.key:/etc/sui-usage-adapter/server.key
+LoadCredential=ca.crt:/etc/sui-usage-adapter/ca.crt
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
