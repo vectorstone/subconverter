@@ -1,5 +1,16 @@
 # Repository Guidelines
 
+## sing-box参考资料
+- 本地 Obsidian 笔记：`<VAULT>/wiki/learning/sing-box`（`<VAULT>` 为本机 vault 根目录，不在仓库内）
+  （11 篇，从配置总纲、DNS 分流、路由规则集到部署排错，优先查阅）
+- 官方文档：https://sing-box.sagernet.org/configuration/
+
+## Project Overview
+
+**subconverter** is a C++20 utility for converting between various proxy subscription formats (Clash, Surge, V2Ray, SSR, Trojan, sing-box, etc.). It runs as both a command-line tool and an HTTP web service (default port 25500).
+
+Version: v0.9.9
+
 ## Project Structure & Module Organization
 - `src/` contains the C++20 application code. Main areas are `parser/` (subscription parsing), `generator/` (target config output), `handler/` (HTTP handlers), `server/` (web server backend), `config/` (shared config models), `script/` (cron/QuickJS integration), and `utils/` (common helpers).
 - `include/` stores bundled third-party headers used at build time.
@@ -8,13 +19,103 @@
 - `cmake/` provides custom CMake `Find*.cmake` modules.
 - There is currently no dedicated `tests/` directory.
 
+## Architecture
+
+### Core Data Structure
+
+The `Proxy` struct (defined in `src/parser/config/proxy.h`) is the central data structure representing a proxy node. It supports:
+- Shadowsocks/ShadowsocksR
+- VMess/VLESS
+- Trojan
+- Hysteria/Hysteria2
+- TUIC
+- AnyTLS
+- WireGuard
+- Snell
+- HTTP/HTTPS/SOCKS5
+
+### Request Flow
+
+1. **HTTP Request** → `src/server/webserver_httplib.cpp`
+2. **Route Handling** → `src/handler/interfaces.cpp`
+   - Main endpoint: `/sub` handled by `subconverter()` function
+3. **Node Parsing** → `src/parser/subparser.cpp`
+   - Fetches subscription content via `webget.cpp`
+   - Parses various formats into `Proxy` structs
+4. **Config Generation** → `src/generator/config/subexport.cpp`
+   - Converts `Proxy` structs to target format output
+
+### Key Components
+
+| Directory | Purpose |
+|-----------|---------|
+| `src/parser/` | Subscription parsing from various formats |
+| `src/generator/` | Output generation for target formats |
+| `src/handler/` | HTTP handlers, web requests, settings |
+| `src/server/` | HTTP server implementation (cpp-httplib) |
+| `src/script/` | QuickJS scripting and cron support |
+| `src/utils/` | Utilities (base64, MD5, string, network) |
+| `base/` | Configuration templates and base files |
+
+### Main API Endpoints
+
+- `GET /sub` - Main conversion endpoint, accepts `target`, `url`, `config` params
+- `GET /version` - Version info
+- `GET /refreshrules` - Refresh rulesets (requires token)
+- `GET /getprofile` - Load and convert profile
+- `GET /getruleset` - Get converted ruleset
+- `GET /render` - Template rendering
+
 ## Build, Test, and Development Commands
-- `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j` — recommended local build (out-of-source).
-- `cmake -DCMAKE_BUILD_TYPE=Release . && make -j` — in-source build flow used by existing release scripts.
-- `./subconverter` — start the local server (default port `25500`).
-- `curl http://127.0.0.1:25500/version` — quick runtime smoke check.
+
+### Dependencies
+
+- CMake >= 3.5
+- C++20 compatible compiler
+- libcurl >= 7.54.0
+- yaml-cpp >= 0.6.3
+- PCRE2
+- RapidJSON
+- toml11
+- QuickJS
+- LibCron
+
+### Build Commands
+
+```bash
+# Recommended local build (out-of-source)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+
+# In-source build flow used by existing release scripts
+cmake -DCMAKE_BUILD_TYPE=Release . && make -j
+
+# Build static library only
+cmake -DBUILD_STATIC_LIBRARY=ON . && make -j3
+
+# Enable malloc_trim for lower memory usage (Linux)
+cmake -DUSING_MALLOC_TRIM=ON . && make -j3
+```
+
+### Running
+
+```bash
+# Run web server on default port 25500
+./subconverter
+
+# With custom config
+./subconverter -f /path/to/pref.toml
+
+# Generator mode
+./subconverter -g --artifact=artifact_name
+
+# Quick runtime smoke check
+curl http://127.0.0.1:25500/version
+```
+
+### Other Commands
+
 - `python3 scripts/update_rules.py -c scripts/rules_config.conf` — refresh bundled rules from upstream repos.
-- `bash scripts/build.alpine.release.sh` / `bash scripts/build.macos.release.sh` / `bash scripts/build.windows.release.sh` — platform release build automation.
+- `bash scripts/build.alpine.release.sh` / `bash scripts/build.macos.release.sh` / `bash scripts/build.windows.release.sh` — platform release build automation (Alpine Linux static build, macOS build, Windows build).
 
 ## Coding Style & Naming Conventions
 - Use C++20 and follow existing file-local patterns.
@@ -34,6 +135,58 @@
 - Scope each commit to one logical change.
 - PR descriptions should include: purpose, key behavior changes, validation steps, and linked issues/PRs (for example `#70`).
 - Include sample request/response snippets when changing conversion logic or API behavior.
+
+## Configuration
+
+Configuration files are loaded in order of preference:
+1. `pref.toml` (TOML format)
+2. `pref.yml` (YAML format)
+3. `pref.ini` (INI format)
+
+If none exist, the program copies from `pref.example.*` templates.
+
+Key configuration sections:
+- `[common]` - API mode, default URLs, proxy settings
+- `[node_pref]` - Node sorting, emoji handling, Clash settings
+- `[managed_config]` - Surge managed config options
+- `[ruleset]` - Ruleset generation settings
+- `[[custom_groups]]` - Proxy group definitions
+- `[[rulesets]]` - Ruleset definitions
+
+## Supported Target Types
+
+| Target | Value |
+|--------|-------|
+| Clash | `clash` |
+| ClashR | `clashr` |
+| Surge | `surge&ver=2/3/4/5` |
+| Surfboard | `surfboard` |
+| Quantumult | `quan` |
+| Quantumult X | `quanx` |
+| Loon | `loon` |
+| sing-box | `singbox` |
+| SS | `ss` |
+| SSR | `ssr` |
+| V2Ray | `v2ray` |
+| Trojan | `trojan` |
+
+## Script Support
+
+The tool supports QuickJS for:
+- **Filter scripts**: Filter nodes based on custom logic
+- **Sort scripts**: Custom node sorting
+- **Cron tasks**: Scheduled execution
+
+Scripts can be inline or loaded from path (`path:/path/to/script.js`).
+
+## Key Files
+
+- `src/main.cpp` - Entry point, server initialization
+- `src/handler/interfaces.cpp` - Main API endpoint implementations
+- `src/parser/subparser.cpp` - Subscription parsing logic
+- `src/generator/config/subexport.cpp` - Export format generators
+- `src/parser/config/proxy.h` - Core Proxy data structure
+- `base/pref.example.toml` - Configuration template
 
 ## Sensitive Information and Push Sanitization
 
