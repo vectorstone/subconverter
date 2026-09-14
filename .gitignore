@@ -6,4 +6,6 @@ base/cache
 build
 temp/
 .omx/
+.omc/
+.sensitive-patterns
 .xmake
