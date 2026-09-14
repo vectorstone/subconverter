@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "generator/config/singbox.h"
+
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -48,6 +50,7 @@ struct ShortLinkConfig
     // Short-link conversions never accept a client-provided config path.
     std::string clash_config = shortlink_clash_lite_config_path;
     bool clash_expand = false;
+    std::string singbox_platform = "macos";
 };
 
 ShortLinkConfig config;
@@ -84,10 +87,13 @@ std::string download_filename(const ShortLinkRecord &record)
     const std::int64_t timestamp = record.updated_at > 0 ? record.updated_at : unix_now();
     int sequence = 1;
     store.get_download_sequence(record, sequence);
-    std::string filename = "custom-clash-" + short_date(timestamp);
+    const bool singbox = record.target == "singbox";
+    std::string filename = std::string("custom-") + (singbox ? "singbox-" : "clash-") + short_date(timestamp);
     if(sequence > 1)
         filename += "-" + std::to_string(sequence - 1);
-    return filename + ".yaml";
+    if(singbox && !record.platform.empty())
+        filename += "-" + record.platform;
+    return filename + (singbox ? ".json" : ".yaml");
 }
 
 void maybe_cleanup()
@@ -307,13 +313,15 @@ bool valid_source_link(const std::string &link)
     return valid_port_in_link(link);
 }
 
-std::string build_source_payload(const string_array &links, const std::string &target)
+std::string build_source_payload(const string_array &links, const std::string &target, const std::string &platform)
 {
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     writer.StartObject();
     writer.Key("target");
     writer.String(target.c_str());
+    writer.Key("platform");
+    writer.String(platform.c_str());
     writer.Key("links");
     writer.StartArray();
     for(const std::string &link : links)
@@ -337,7 +345,7 @@ std::string shortlink_download_url(const std::string &url)
     return url + (url.find('?') == std::string::npos ? "?download=1" : "&download=1");
 }
 
-bool parse_shortlink_request(const std::string &body, string_array &links, std::string &target, int &ttl, std::string &name, std::string &error)
+bool parse_shortlink_request(const std::string &body, string_array &links, std::string &target, std::string &platform, int &ttl, std::string &name, std::string &error)
 {
     if(body.size() > config.max_input_bytes)
     {
@@ -351,11 +359,25 @@ bool parse_shortlink_request(const std::string &body, string_array &links, std::
         error = "request body must be a JSON object";
         return false;
     }
-    target = document.HasMember("target") && document["target"].IsString() ? document["target"].GetString() : "clash";
-    if(target != "clash")
+    target = document.HasMember("target") && document["target"].IsString() ? toLower(trim(document["target"].GetString())) : "clash";
+    if(target != "clash" && target != "singbox")
     {
-        error = "only clash target is supported";
+        error = "only clash and singbox targets are supported";
         return false;
+    }
+    if(document.HasMember("platform") && document["platform"].IsString())
+        platform = toLower(trim(document["platform"].GetString()));
+    if(target == "singbox")
+    {
+        if(platform.empty())
+            platform = config.singbox_platform;
+        singbox::Platform parsed_platform = singbox::Platform::MacOS;
+        if(!singbox::parsePlatform(platform, parsed_platform))
+        {
+            error = "unsupported platform '" + platform + "', expected one of " + singbox::platformList();
+            return false;
+        }
+        platform = singbox::platformName(parsed_platform);
     }
     if(document.HasMember("name") && document["name"].IsString())
         name = trim(document["name"].GetString());
@@ -417,18 +439,25 @@ bool parse_shortlink_request(const std::string &body, string_array &links, std::
     return true;
 }
 
-std::string conversion_snapshot(const string_array &links, Response &conversion_response)
+std::string conversion_snapshot(const string_array &links, const std::string &target, const std::string &platform, Response &conversion_response)
 {
     Request conversion_request;
     conversion_request.method = "GET";
-    conversion_request.argument.emplace("target", "clash");
+    conversion_request.argument.emplace("target", target);
     conversion_request.argument.emplace("url", join(links, "|"));
     conversion_request.argument.emplace("insert", "false");
-    // The profile is service-controlled so API callers cannot inject config
-    // paths or external URLs. Lite is the default; operators may choose one
-    // of the explicitly allowed bundled rollback profiles at startup.
-    conversion_request.argument.emplace("config", config.clash_config);
-    conversion_request.argument.emplace("expand", config.clash_expand ? "true" : "false");
+    if(target == "singbox")
+    {
+        conversion_request.argument.emplace("singbox_platform", platform);
+    }
+    else
+    {
+        // The profile is service-controlled so API callers cannot inject config
+        // paths or external URLs. Lite is the default; operators may choose one
+        // of the explicitly allowed bundled rollback profiles at startup.
+        conversion_request.argument.emplace("config", config.clash_config);
+        conversion_request.argument.emplace("expand", config.clash_expand ? "true" : "false");
+    }
     conversion_request.headers = {};
     std::string snapshot = subconverter(conversion_request, conversion_response);
     return snapshot;
@@ -444,6 +473,7 @@ std::string create_response(const ShortLinkRecord &record)
     writer.Key("id"); writer.String(record.id.c_str());
     writer.Key("name"); writer.String(record.name.c_str());
     writer.Key("target"); writer.String(record.target.c_str());
+    writer.Key("platform"); writer.String(record.platform.c_str());
     writer.Key("links_count"); writer.Int(record.links_count);
     writer.Key("short_url"); writer.String(url.c_str());
     writer.Key("preview_url"); writer.String(url.c_str());
@@ -512,6 +542,14 @@ bool initializeShortLinkService()
     config.lite_max_output_bytes = static_cast<std::size_t>(std::max(env_int("SHORTLINK_LITE_MAX_OUTPUT_BYTES", 256 * 1024), 1024));
     config.max_links = std::max(env_int("SHORTLINK_MAX_LINKS", 100), 1);
     config.allow_private_hosts = env_bool("SHORTLINK_ALLOW_PRIVATE_HOSTS", false);
+    config.singbox_platform = toLower(trim(getEnv("SHORTLINK_SINGBOX_PLATFORM")));
+    {
+        singbox::Platform parsed_platform = singbox::Platform::MacOS;
+        if(config.singbox_platform.empty() || !singbox::parsePlatform(config.singbox_platform, parsed_platform))
+            config.singbox_platform = "macos";
+        else
+            config.singbox_platform = singbox::platformName(parsed_platform);
+    }
     configure_shortlink_clash_profile();
     if(config.connection_string.empty() || config.encryption_key.empty())
     {
@@ -545,12 +583,12 @@ std::string createShortLink(RESPONSE_CALLBACK_ARGS)
         return json_error(response, 401, "authentication required");
 
     string_array links;
-    std::string target, name, error;
+    std::string target, platform, name, error;
     int ttl = config.default_ttl;
-    if(!parse_shortlink_request(request.postdata, links, target, ttl, name, error))
+    if(!parse_shortlink_request(request.postdata, links, target, platform, ttl, name, error))
         return json_error(response, error == "request body is too large" ? 413 : 400, error);
     Response conversion_response;
-    const std::string snapshot = conversion_snapshot(links, conversion_response);
+    const std::string snapshot = conversion_snapshot(links, target, platform, conversion_response);
     if(snapshot.size() > config.max_output_bytes)
         return json_error(response, 413, "generated configuration is too large");
     if(lite_snapshot_too_large(snapshot))
@@ -562,17 +600,18 @@ std::string createShortLink(RESPONSE_CALLBACK_ARGS)
     }
 
     std::string source_payload, snapshot_payload;
-    if(!secret_box.encrypt(build_source_payload(links, target), source_payload) || !secret_box.encrypt(snapshot, snapshot_payload))
+    if(!secret_box.encrypt(build_source_payload(links, target, platform), source_payload) || !secret_box.encrypt(snapshot, snapshot_payload))
         return json_error(response, 500, "unable to encrypt short-link payload");
 
     ShortLinkRecord record;
     record.owner = owner;
     record.name = name;
     record.target = target;
+    record.platform = platform;
     record.source_payload = source_payload;
     record.snapshot_payload = snapshot_payload;
     record.response_headers = json_headers(conversion_response.headers);
-    record.content_type = "text/yaml; charset=utf-8";
+    record.content_type = target == "singbox" ? "application/json; charset=utf-8" : "text/yaml; charset=utf-8";
     record.content_hash = sha256Hex(snapshot);
     record.links_count = static_cast<int>(links.size());
     record.expires_at = ttl > 0 ? unix_now() + ttl : 0;
@@ -620,6 +659,7 @@ std::string listShortLinks(RESPONSE_CALLBACK_ARGS)
         }
         writer.Key("name"); writer.String(record.name.c_str());
         writer.Key("target"); writer.String(record.target.c_str());
+        writer.Key("platform"); writer.String(record.platform.c_str());
         writer.Key("links_count"); writer.Int(record.links_count);
         const std::string url = shortlink_url(record.code);
         writer.Key("short_url"); writer.String(url.c_str());
@@ -678,8 +718,10 @@ std::string refreshShortLink(RESPONSE_CALLBACK_ARGS)
     }
     if(links.empty())
         return json_error(response, 500, "short-link source has no links");
+    const std::string refresh_target = record.target.empty() ? "clash" : record.target;
+    const std::string refresh_platform = record.platform.empty() ? config.singbox_platform : record.platform;
     Response conversion_response;
-    const std::string snapshot = conversion_snapshot(links, conversion_response);
+    const std::string snapshot = conversion_snapshot(links, refresh_target, refresh_platform, conversion_response);
     if(snapshot.size() > config.max_output_bytes)
         return json_error(response, 413, "generated configuration is too large");
     if(lite_snapshot_too_large(snapshot))

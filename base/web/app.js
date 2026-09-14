@@ -3,6 +3,8 @@
     const nameInput = document.querySelector('#name');
     const linksInput = document.querySelector('#links');
     const expiresInput = document.querySelector('#expires');
+    const targetInput = document.querySelector('#target');
+    const platformInput = document.querySelector('#platform');
     const message = document.querySelector('#message');
     const resultCard = document.querySelector('#result-card');
     const shortUrl = document.querySelector('#short-url');
@@ -23,6 +25,18 @@
     const copyText = async (value) => {
         await navigator.clipboard.writeText(value);
         setMessage('已复制到剪贴板。', false);
+    };
+
+    const currentTarget = () => (targetInput ? targetInput.value : 'clash');
+    const currentPlatform = () => (platformInput ? platformInput.value : '');
+
+    const syncPlatformState = () => {
+        if (!platformInput) return;
+        const singbox = currentTarget() === 'singbox';
+        platformInput.disabled = !singbox;
+        if (downloadLink) downloadLink.download = singbox ? 'config.json' : 'config.yaml';
+        if (downloadLink && !downloadLink.classList.contains('disabled'))
+            downloadLink.textContent = singbox ? '下载 JSON' : '下载 YAML';
     };
 
     const formatDate = (timestamp) => {
@@ -77,7 +91,10 @@
             const expired = Boolean(item.expires_at && item.expires_at * 1000 <= Date.now());
             const unavailable = Boolean(item.revoked_at) || expired;
             const state = item.revoked_at ? '已撤销' : (expired ? '已过期' : '有效');
-            detail.textContent = (item.owner ? item.owner + ' · ' : '') + item.links_count + ' 个输入 · 更新于 ' + formatDate(item.updated_at) + ' · ' + state;
+            const format = item.target === 'singbox'
+                ? 'sing-box/' + (item.platform || 'macos')
+                : 'clash';
+            detail.textContent = (item.owner ? item.owner + ' · ' : '') + format + ' · ' + item.links_count + ' 个输入 · 更新于 ' + formatDate(item.updated_at) + ' · ' + state;
             const url = document.createElement('code');
             url.textContent = item.short_url;
             body.append(title, detail, url);
@@ -89,7 +106,7 @@
             copy.onclick = () => copyText(item.short_url);
             const download = document.createElement('a');
             download.className = 'button';
-            download.textContent = '下载 YAML';
+            download.textContent = item.target === 'singbox' ? '下载 JSON' : '下载 YAML';
             download.href = item.download_url || (item.short_url + (item.short_url.includes('?') ? '&' : '?') + 'download=1');
             download.setAttribute('download', '');
             download.rel = 'noreferrer';
@@ -156,7 +173,13 @@
             const response = await fetch('/api/short-links', {
                 method: 'POST',
                 headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
-                body: JSON.stringify({ name: nameInput.value.trim(), target: 'clash', expires_in: Number(expiresInput.value), links })
+                body: JSON.stringify({
+                    name: nameInput.value.trim(),
+                    target: currentTarget(),
+                    platform: currentTarget() === 'singbox' ? currentPlatform() : '',
+                    expires_in: Number(expiresInput.value),
+                    links
+                })
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || ('创建失败（' + response.status + '）'));
@@ -172,6 +195,9 @@
             setMessage(error.message, true);
         }
     });
+
+    if (targetInput) targetInput.addEventListener('change', syncPlatformState);
+    syncPlatformState();
 
     document.querySelector('#copy-button').onclick = () => copyText(shortUrl.value);
     document.querySelector('#clear-button').onclick = () => {

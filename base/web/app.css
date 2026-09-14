@@ -13,7 +13,7 @@ label { display: block; margin: 16px 0 8px; color: #4f6077; font-size: 13px; fon
 input, textarea, select { width: 100%; border: 1px solid #cfd9e8; border-radius: 10px; padding: 11px 12px; color: #172238; background: #fff; font: inherit; }
 textarea { min-height: 230px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.5; }
 .form-row, .section-title, .copy-row, .button-row, .link-row { display: flex; gap: 12px; align-items: center; }
-.form-row > div:first-child { flex: 1; }
+.form-row > div:not(.form-actions) { flex: 1; }
 .form-actions { display: flex; gap: 10px; align-items: end; padding-top: 28px; }
 button, .button { display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; padding: 11px 16px; color: #fff; background: #3f6fd9; cursor: pointer; font: inherit; font-weight: 700; }
 button:hover, .button:hover { filter: brightness(.96); }

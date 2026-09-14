@@ -15,6 +15,7 @@ struct ShortLinkRecord
     std::string owner;
     std::string name;
     std::string target;
+    std::string platform;
     std::string source_payload;
     std::string snapshot_payload;
     std::string response_headers;

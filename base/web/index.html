@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="referrer" content="no-referrer">
     <title>SubConverter 短链管理</title>
-    <link rel="stylesheet" href="/app.css?v=20260906-3">
+    <link rel="stylesheet" href="/app.css?v=20260915-1">
 </head>
 <body>
 <main class="page">
     <header class="hero">
         <p class="eyebrow">SUBCONVERTER</p>
         <h1>节点订阅短链</h1>
-        <p class="subtitle">输入节点或机场订阅链接，生成可直接用于 Clash Verge / mihomo 的配置短链。</p>
+        <p class="subtitle">输入节点或机场订阅链接，生成可直接用于 Clash Verge / mihomo 或 sing-box 的配置短链。</p>
     </header>
     <section class="card">
         <form id="create-form">
@@ -21,6 +21,24 @@
             <label for="links">节点链接（每行一个）</label>
             <textarea id="links" name="links" required spellcheck="false" placeholder="ss://...\nvless://...\ntuic://..."></textarea>
             <div class="form-row">
+                <div>
+                    <label for="target">目标格式</label>
+                    <select id="target" name="target">
+                        <option value="clash" selected>Clash / mihomo（YAML）</option>
+                        <option value="singbox">sing-box（JSON）</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="platform">sing-box 平台</label>
+                    <select id="platform" name="platform" disabled>
+                        <option value="macos" selected>macOS</option>
+                        <option value="windows">Windows</option>
+                        <option value="linux">Linux 桌面</option>
+                        <option value="android">Android（官方客户端）</option>
+                        <option value="ios">iOS（SFI / SFM）</option>
+                        <option value="openwrt">ImmortalWrt / OpenWrt（Open-Box）</option>
+                    </select>
+                </div>
                 <div>
                     <label for="expires">有效期</label>
                     <select id="expires" name="expires">
@@ -61,6 +79,6 @@
         <div id="users-list" class="links-list"></div>
     </section>
 </main>
-<script src="/app.js?v=20260906-3" defer></script>
+<script src="/app.js?v=20260915-2" defer></script>
 </body>
 </html>

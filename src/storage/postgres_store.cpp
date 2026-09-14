@@ -28,7 +28,10 @@ bool exec_params(PGconn *connection, const std::string &sql, const std::vector<c
     std::vector<int> lengths(values.size(), 0), formats(values.size(), 0);
     *result = PQexecParams(connection, sql.c_str(), static_cast<int>(values.size()), nullptr,
                            values.empty() ? nullptr : values.data(), lengths.data(), formats.data(), 0);
-    return result_ok(*result, PGRES_COMMAND_OK) || result_ok(*result, PGRES_TUPLES_OK);
+    const bool ok = result_ok(*result, PGRES_COMMAND_OK) || result_ok(*result, PGRES_TUPLES_OK);
+    if(!ok && *result != nullptr)
+        writeLog(0, "PostgreSQL query failed: " + std::string(PQresultErrorMessage(*result)), LOG_LEVEL_ERROR);
+    return ok;
 }
 
 bool exec_command(PGconn *connection, const std::string &sql)
@@ -122,6 +125,7 @@ CREATE TABLE IF NOT EXISTS short_links (
     code TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL DEFAULT '',
     target TEXT NOT NULL DEFAULT 'clash',
+    platform TEXT NOT NULL DEFAULT '',
     source_payload TEXT NOT NULL,
     snapshot_payload TEXT NOT NULL,
     response_headers TEXT NOT NULL DEFAULT '{}',
@@ -141,6 +145,7 @@ CREATE TABLE IF NOT EXISTS short_link_versions (
     content_hash TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE short_links ADD COLUMN IF NOT EXISTS platform TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS short_links_owner_idx ON short_links(owner_subject, created_at DESC);
 CREATE INDEX IF NOT EXISTS short_links_expiry_idx ON short_links(expires_at);
 )SQL";
@@ -317,11 +322,11 @@ bool PostgresStore::create_short_link(const ShortLinkRecord &record, int max_act
     {
         const std::string expiry = record.expires_at > 0 ? std::to_string(record.expires_at) : "";
         const std::string links_count = std::to_string(record.links_count);
-        const char *values[] = {record.owner.c_str(), record.code.c_str(), record.name.c_str(), record.target.c_str(), record.source_payload.c_str(), record.snapshot_payload.c_str(), record.response_headers.c_str(), record.content_type.c_str(), record.content_hash.c_str(), links_count.c_str(), expiry.c_str()};
+        const char *values[] = {record.owner.c_str(), record.code.c_str(), record.name.c_str(), record.target.c_str(), record.platform.c_str(), record.source_payload.c_str(), record.snapshot_payload.c_str(), record.response_headers.c_str(), record.content_type.c_str(), record.content_hash.c_str(), links_count.c_str(), expiry.c_str()};
         result = nullptr;
         ok = exec_params(connection_,
-            "INSERT INTO short_links(owner_subject, code, name, target, source_payload, snapshot_payload, response_headers, content_type, content_hash, links_count, expires_at) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::integer, NULLIF(to_timestamp(NULLIF($11, '')::double precision), to_timestamp(0))) RETURNING id",
-            {values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9], values[10]}, &result);
+            "INSERT INTO short_links(owner_subject, code, name, target, platform, source_payload, snapshot_payload, response_headers, content_type, content_hash, links_count, expires_at) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::integer, NULLIF(to_timestamp(NULLIF($12, '')::double precision), to_timestamp(0))) RETURNING id",
+            {values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9], values[10], values[11]}, &result);
         if(ok && PQntuples(result) > 0)
             id = result_value(result, 0, 0);
         PQclear(result);
@@ -341,7 +346,7 @@ bool PostgresStore::get_short_link(const std::string &code, ShortLinkRecord &rec
     const char *values[] = {code.c_str()};
     PGresult *result = nullptr;
     const bool ok = exec_params(connection_,
-        "SELECT id::text, code, owner_subject, name, target, source_payload, snapshot_payload, response_headers, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links WHERE code = $1",
+        "SELECT id::text, code, owner_subject, name, target, platform, source_payload, snapshot_payload, response_headers, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links WHERE code = $1",
         {values[0]}, &result);
     if(ok && PQntuples(result) > 0)
     {
@@ -350,16 +355,17 @@ bool PostgresStore::get_short_link(const std::string &code, ShortLinkRecord &rec
         record.owner = result_value(result, 0, 2);
         record.name = result_value(result, 0, 3);
         record.target = result_value(result, 0, 4);
-        record.source_payload = result_value(result, 0, 5);
-        record.snapshot_payload = result_value(result, 0, 6);
-        record.response_headers = result_value(result, 0, 7);
-        record.content_type = result_value(result, 0, 8);
-        record.content_hash = result_value(result, 0, 9);
-        record.links_count = std::atoi(result_value(result, 0, 10).c_str());
-        record.created_at = parse_timestamp(result_value(result, 0, 11));
-        record.updated_at = parse_timestamp(result_value(result, 0, 12));
-        record.expires_at = parse_timestamp(result_value(result, 0, 13));
-        record.revoked_at = parse_timestamp(result_value(result, 0, 14));
+        record.platform = result_value(result, 0, 5);
+        record.source_payload = result_value(result, 0, 6);
+        record.snapshot_payload = result_value(result, 0, 7);
+        record.response_headers = result_value(result, 0, 8);
+        record.content_type = result_value(result, 0, 9);
+        record.content_hash = result_value(result, 0, 10);
+        record.links_count = std::atoi(result_value(result, 0, 11).c_str());
+        record.created_at = parse_timestamp(result_value(result, 0, 12));
+        record.updated_at = parse_timestamp(result_value(result, 0, 13));
+        record.expires_at = parse_timestamp(result_value(result, 0, 14));
+        record.revoked_at = parse_timestamp(result_value(result, 0, 15));
     }
     PQclear(result);
     return ok && !record.id.empty();
@@ -373,8 +379,8 @@ bool PostgresStore::get_short_link_by_id(const std::string &owner, const std::st
     const char *values[] = {owner.c_str(), id.c_str()};
     PGresult *result = nullptr;
     const bool ok = all_owners
-        ? exec_params(connection_, "SELECT id::text, code, owner_subject, name, target, source_payload, snapshot_payload, response_headers, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links WHERE id::text = $1", {values[1]}, &result)
-        : exec_params(connection_, "SELECT id::text, code, owner_subject, name, target, source_payload, snapshot_payload, response_headers, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links WHERE owner_subject = $1 AND id::text = $2", {values[0], values[1]}, &result);
+        ? exec_params(connection_, "SELECT id::text, code, owner_subject, name, target, platform, source_payload, snapshot_payload, response_headers, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links WHERE id::text = $1", {values[1]}, &result)
+        : exec_params(connection_, "SELECT id::text, code, owner_subject, name, target, platform, source_payload, snapshot_payload, response_headers, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links WHERE owner_subject = $1 AND id::text = $2", {values[0], values[1]}, &result);
     if(ok && PQntuples(result) > 0)
     {
         record.id = result_value(result, 0, 0);
@@ -382,16 +388,17 @@ bool PostgresStore::get_short_link_by_id(const std::string &owner, const std::st
         record.owner = result_value(result, 0, 2);
         record.name = result_value(result, 0, 3);
         record.target = result_value(result, 0, 4);
-        record.source_payload = result_value(result, 0, 5);
-        record.snapshot_payload = result_value(result, 0, 6);
-        record.response_headers = result_value(result, 0, 7);
-        record.content_type = result_value(result, 0, 8);
-        record.content_hash = result_value(result, 0, 9);
-        record.links_count = std::atoi(result_value(result, 0, 10).c_str());
-        record.created_at = parse_timestamp(result_value(result, 0, 11));
-        record.updated_at = parse_timestamp(result_value(result, 0, 12));
-        record.expires_at = parse_timestamp(result_value(result, 0, 13));
-        record.revoked_at = parse_timestamp(result_value(result, 0, 14));
+        record.platform = result_value(result, 0, 5);
+        record.source_payload = result_value(result, 0, 6);
+        record.snapshot_payload = result_value(result, 0, 7);
+        record.response_headers = result_value(result, 0, 8);
+        record.content_type = result_value(result, 0, 9);
+        record.content_hash = result_value(result, 0, 10);
+        record.links_count = std::atoi(result_value(result, 0, 11).c_str());
+        record.created_at = parse_timestamp(result_value(result, 0, 12));
+        record.updated_at = parse_timestamp(result_value(result, 0, 13));
+        record.expires_at = parse_timestamp(result_value(result, 0, 14));
+        record.revoked_at = parse_timestamp(result_value(result, 0, 15));
     }
     PQclear(result);
     return ok && !record.id.empty();
@@ -405,8 +412,8 @@ bool PostgresStore::list_short_links(const std::string &owner, std::vector<Short
     const char *values[] = {owner.c_str()};
     PGresult *result = nullptr;
     const bool ok = all_owners
-        ? exec_params(connection_, "SELECT id::text, code, owner_subject, name, target, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links ORDER BY created_at DESC LIMIT 200", {}, &result)
-        : exec_params(connection_, "SELECT id::text, code, owner_subject, name, target, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links WHERE owner_subject = $1 ORDER BY created_at DESC LIMIT 200", {values[0]}, &result);
+        ? exec_params(connection_, "SELECT id::text, code, owner_subject, name, target, platform, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links ORDER BY created_at DESC LIMIT 200", {}, &result)
+        : exec_params(connection_, "SELECT id::text, code, owner_subject, name, target, platform, content_type, content_hash, links_count::text, EXTRACT(EPOCH FROM created_at)::bigint::text, EXTRACT(EPOCH FROM updated_at)::bigint::text, COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint::text, ''), COALESCE(EXTRACT(EPOCH FROM revoked_at)::bigint::text, '') FROM short_links WHERE owner_subject = $1 ORDER BY created_at DESC LIMIT 200", {values[0]}, &result);
     if(ok)
     {
         for(int row = 0; row < PQntuples(result); row++)
@@ -417,13 +424,14 @@ bool PostgresStore::list_short_links(const std::string &owner, std::vector<Short
             item.owner = result_value(result, row, 2);
             item.name = result_value(result, row, 3);
             item.target = result_value(result, row, 4);
-            item.content_type = result_value(result, row, 5);
-            item.content_hash = result_value(result, row, 6);
-            item.links_count = std::atoi(result_value(result, row, 7).c_str());
-            item.created_at = parse_timestamp(result_value(result, row, 8));
-            item.updated_at = parse_timestamp(result_value(result, row, 9));
-            item.expires_at = parse_timestamp(result_value(result, row, 10));
-            item.revoked_at = parse_timestamp(result_value(result, row, 11));
+            item.platform = result_value(result, row, 5);
+            item.content_type = result_value(result, row, 6);
+            item.content_hash = result_value(result, row, 7);
+            item.links_count = std::atoi(result_value(result, row, 8).c_str());
+            item.created_at = parse_timestamp(result_value(result, row, 9));
+            item.updated_at = parse_timestamp(result_value(result, row, 10));
+            item.expires_at = parse_timestamp(result_value(result, row, 11));
+            item.revoked_at = parse_timestamp(result_value(result, row, 12));
             records.emplace_back(std::move(item));
         }
     }
