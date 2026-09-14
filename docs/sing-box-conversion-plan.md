@@ -500,7 +500,14 @@ src/generator/config/singbox/
 >   本轮已把 `codex/shortlink-usage` 合入工作分支 `codex/singbox-conversion`（合并提交，无功能取舍）：
 >   `base/web/index.html`、`base/web/app.js` 以用量面板为基线重新叠加目标/平台选择器；`tests/shortlink_api_smoke.sh` 保留空 body POST 修复与 API key / 管理员 token 双认证。
 >   合并后本地重新构建通过，`tests/singbox_golden.sh` 全绿，`scripts/check-sensitive.sh --all` 无发现。
-> - M7 待办：用合并后的源码构建镜像 → 备份 prod（`.env`、数据卷、当前镜像 digest）→ 灰度替换 → 验证 `/version`、短链 smoke、用量接口未回退 → 保留回滚路径。
+> - **M7 已完成（2026-09-15）**：
+>   1. 用合并后的源码在构建机构建发布镜像（`scripts/Dockerfile`），`docker save` 传输并在目标机 `docker load`；
+>   2. 变更前备份：`.env`、两个 compose 文件、变更前镜像 digest、`pg_dump`（约 50 MB）到 `backups/singbox-<UTC 时间戳>/`；
+>   3. 仅修改 compose override 的 `image` 字段后 `docker compose up -d`（容器 0 次重启）；
+>   4. 验证：`/version` 200；**`/api/usage` 与 `/api/admin/usage-providers` 仍为 200（用量功能未回退）**；nginx → 容器 200；`/api/short-links` 401（路由正常）；六平台生成物 check —— macos/windows/linux 本机通过、openwrt 在网关内核通过；短链 API smoke `shortlink-smoke-ok`；
+>   5. 回滚路径：上一镜像 `subconverter-local:usage-11d3ffa02596` 仍在目标机，备份目录内保留改前的 override 与 `.env`，`docker compose up -d` 即可回退。
+> - **变更前后对比（prod）**：变更前 `/sub?target=singbox` 输出在 1.14 上 `FATAL ... legacy DNS fakeip options ... removed in sing-box 1.14.0`；变更后同请求输出通过 `check`。
+> - 未执行项（需显式确认）：在网关上按 §4.5 路径 B 实机替换 `/opt/open-box/etc/config.json` —— 会短暂中断 LAN，目前只做了 `check` 验证。
 
 
 
