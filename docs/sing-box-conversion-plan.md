@@ -496,7 +496,11 @@ src/generator/config/singbox/
 >   2. `exec_params` 失败时静默返回，掩盖了上一条错误 → 现在会把 PostgreSQL 错误写入日志。
 > - `tests/shortlink_api_smoke.sh` 另修正两处用例缺陷：httplib 对**无 Content-Length 的 POST** 返回 400（刷新请求需带空 body）；断言原先用命令行传整份配置导致 `Argument list too long`（改为临时文件）。
 > - 回归证据：以 `27cc484`（改动前）单独构建的二进制与当前二进制，对同一订阅输出 `clash`/`clashr`/`surge` **逐字节相同**（使用仓库默认 `base/pref.toml`）。
-> - **M7 前置发现**：prod 现网运行的是 `codex/shortlink-usage` 分支构建的镜像（含 `SHORTLINK_USAGE_*` 用量采集与 `/api/usage`、`services/sui-usage-adapter`）。该分支比 master 多 2 个提交（+5815 行），**不在当前 master 上**。因此 prod 灰度前必须先把该分支合入本次工作线，否则会回退掉线上用量功能。
+> - **M7 前置发现（已处理）**：prod 现网运行的是 `codex/shortlink-usage` 分支构建的镜像（含 `SHORTLINK_USAGE_*` 用量采集、`/api/usage`、`services/sui-usage-adapter`）。该分支比 master 多 2 个提交（+5815 行），**不在 master 上**；直接部署会回退线上用量功能。
+>   本轮已把 `codex/shortlink-usage` 合入工作分支 `codex/singbox-conversion`（合并提交，无功能取舍）：
+>   `base/web/index.html`、`base/web/app.js` 以用量面板为基线重新叠加目标/平台选择器；`tests/shortlink_api_smoke.sh` 保留空 body POST 修复与 API key / 管理员 token 双认证。
+>   合并后本地重新构建通过，`tests/singbox_golden.sh` 全绿，`scripts/check-sensitive.sh --all` 无发现。
+> - M7 待办：用合并后的源码构建镜像 → 备份 prod（`.env`、数据卷、当前镜像 digest）→ 灰度替换 → 验证 `/version`、短链 smoke、用量接口未回退 → 保留回滚路径。
 
 
 
