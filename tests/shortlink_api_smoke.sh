@@ -9,7 +9,7 @@ LITE_MAX_SNAPSHOT_BYTES="${LITE_MAX_SNAPSHOT_BYTES:-262144}"
 # service admin token (Authorization: Bearer).
 AUTH_ARGS=()
 if [[ -n "${API_KEY:-}" ]]; then
-    AUTH_ARGS+=("${AUTH_ARGS[@]}")
+    AUTH_ARGS+=(-H "X-API-Key: ${API_KEY}")
 fi
 if [[ -n "${API_TOKEN:-}" ]]; then
     AUTH_ARGS+=(-H "Authorization: Bearer ${API_TOKEN}")
