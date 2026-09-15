@@ -1499,7 +1499,9 @@ http://127.0.0.1:25500/getruleset?type=%TYPE%&url=%URL%&group=%GROUP%
 
 短链采用快照模式。已有短链可以作为新的 HTTPS 输入源，与其他 SS、VLESS、TUIC 或机场订阅合并后生成新的短链。短链内容、过期时间和撤销状态保存在 PostgreSQL 中，节点凭据通过 SHORTLINK_ENCRYPTION_KEY 加密。
 
-短链统一使用 Lite Clash 转换方案：`SHORTLINK_CLASH_CONFIG` 默认 `config/default_clash_lite.ini`，`SHORTLINK_CLASH_EXPAND` 默认 `false`。服务端固定 `target=clash`、`insert=false`，并且 Web UI/API 不接受用户传入任意 `config`，生成结果通过远程 `rule-providers` 引用规则而不是把完整规则写入快照。`SHORTLINK_LITE_MAX_OUTPUT_BYTES` 默认 262144，Lite 快照异常增大时会在写入数据库前拒绝。
+短链的 Clash 目标统一使用 Lite 转换方案：`SHORTLINK_CLASH_CONFIG` 默认 `config/default_clash_lite.ini`，`SHORTLINK_CLASH_EXPAND` 默认 `false`。服务端按目标选择配置、固定 `insert=false`，并且 Web UI/API 不接受用户传入任意 `config`，生成结果通过远程 `rule-providers` 引用规则而不是把完整规则写入快照。`SHORTLINK_LITE_MAX_OUTPUT_BYTES` 默认 262144，Lite 快照异常增大时会在写入数据库前拒绝。
+
+该 Lite 上限**只适用于 `clash` 目标**。`singbox` 短链由平台生成器根据本地偏好规则集生成，不使用 Lite 方案，因此只受 `SHORTLINK_MAX_OUTPUT_BYTES`（16 MiB）约束；对它套用 256 KiB 的 Lite 上限会误拒正常订阅。短链支持 `target=clash` 与 `target=singbox`，sing-box 需附带 `platform=<macos|windows|linux|android|ios|openwrt>`。
 
 这两个环境变量也是配置回滚开关。若要让**新建或刷新**的短链临时使用旧的展开式链式配置，可设置 `SHORTLINK_CLASH_CONFIG=config/default_clash_chainproxy.ini` 和 `SHORTLINK_CLASH_EXPAND=true` 后重启服务；恢复 Lite 值并重启即可重新启用 Lite。读取已有快照不会重新转换，因此历史快照（包括 Lite 上线前的旧快照）会原样兼容下载。只有显式调用 `POST /api/short-links/<id>/refresh` 时，才会从该短链加密保存的原始来源，按**刷新当时**的 Lite/回滚设置重新计算并写入该短链；刷新 A 不会隐式改变依赖 A 的短链 B。
 

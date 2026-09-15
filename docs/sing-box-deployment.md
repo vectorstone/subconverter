@@ -89,7 +89,8 @@ curl -fsS http://127.0.0.1:<PORT>/version
 # 2. 六平台生成 + 结构断言 + 链式校验（本机或构建机）
 tests/singbox_golden.sh
 
-# 3. 短链 API（含 sing-box 平台、非法平台 400、下载文件名与 Content-Type）
+# 3. 短链 API（含 sing-box 平台、非法平台 400、下载文件名与 Content-Type，
+#    以及 100 节点 sing-box 快照必须越过 Clash Lite 上限仍返回 201 的回归用例）
 BASE_URL=http://127.0.0.1:<PORT> API_KEY=<API_TOKEN> tests/shortlink_api_smoke.sh
 
 # 4. 生成的 sing-box 配置逐平台校验

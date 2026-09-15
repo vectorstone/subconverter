@@ -137,8 +137,15 @@ void configure_shortlink_clash_profile()
     config.clash_expand = env_bool("SHORTLINK_CLASH_EXPAND", false);
 }
 
-bool lite_snapshot_too_large(const std::string &snapshot)
+bool lite_snapshot_too_large(const std::string &snapshot, const std::string &target)
 {
+    // The limit bounds the Clash Lite snapshot, which keeps the rule corpus out
+    // of the document by referencing remote rule providers. A sing-box snapshot
+    // never uses that profile: it is generated from the local preference
+    // rulesets, so it is only bounded by max_output_bytes. Enforcing the Lite
+    // limit on it rejected ordinary sing-box subscriptions.
+    if(target == "singbox")
+        return false;
     return config.clash_config == shortlink_clash_lite_config_path
         && !config.clash_expand
         && snapshot.size() > config.lite_max_output_bytes;
@@ -619,7 +626,7 @@ std::string createShortLink(RESPONSE_CALLBACK_ARGS)
     const std::string snapshot = conversion_snapshot(links, target, platform, conversion_response);
     if(snapshot.size() > config.max_output_bytes)
         return json_error(response, 413, "generated configuration is too large");
-    if(lite_snapshot_too_large(snapshot))
+    if(lite_snapshot_too_large(snapshot, target))
         return json_error(response, 413, "generated Lite configuration exceeds the configured size limit");
     if(conversion_response.status_code < 200 || conversion_response.status_code >= 300 || snapshot.empty())
     {
@@ -752,7 +759,7 @@ std::string refreshShortLink(RESPONSE_CALLBACK_ARGS)
     const std::string snapshot = conversion_snapshot(links, refresh_target, refresh_platform, conversion_response);
     if(snapshot.size() > config.max_output_bytes)
         return json_error(response, 413, "generated configuration is too large");
-    if(lite_snapshot_too_large(snapshot))
+    if(lite_snapshot_too_large(snapshot, refresh_target))
         return json_error(response, 413, "generated Lite configuration exceeds the configured size limit");
     std::string snapshot_payload;
     if(conversion_response.status_code < 200 || conversion_response.status_code >= 300 || snapshot.empty() || !secret_box.encrypt(snapshot, snapshot_payload))

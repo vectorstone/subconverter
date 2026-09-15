@@ -69,11 +69,11 @@
 
 ### 3.1 Lite 配置、旧快照与刷新边界
 
-短链创建和刷新统一固定为 `target=clash`、`insert=false`，不使用调用方提交的任意 `config`。服务端通过以下环境变量选择受控模板：
+短链创建和刷新固定 `insert=false`，不使用调用方提交的任意 `config`：`target=clash` 走受控模板，`target=singbox` 走平台生成器（`platform` 参数）。服务端通过以下环境变量选择 Clash 受控模板：
 
 - `SHORTLINK_CLASH_CONFIG`：默认 `config/default_clash_lite.ini`。
 - `SHORTLINK_CLASH_EXPAND`：默认 `false`。
-- `SHORTLINK_LITE_MAX_OUTPUT_BYTES`：默认 262144，阻止异常增大的 Lite 快照写入数据库。
+- `SHORTLINK_LITE_MAX_OUTPUT_BYTES`：默认 262144，阻止异常增大的 Lite 快照写入数据库；**仅对 `clash` 目标生效**。`singbox` 快照由本地偏好规则集生成、不使用 Lite 方案，只受 `SHORTLINK_MAX_OUTPUT_BYTES`（默认 16 MiB）约束，否则正常规模的订阅会被误拒。
 
 Lite 模式避免把远端规则全文写入快照，生成 `rule-providers` 和少量 `RULE-SET` 引用，以限制数据库快照体积。转换阶段仍会读取规则源元数据，客户端也需要能够访问 provider URL。
 
