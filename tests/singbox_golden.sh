@@ -29,6 +29,7 @@ FIXTURES="$ROOT/tests/singbox/fixtures"
 cleanup() {
     [[ -n "${CONVERTER_PID:-}" ]] && kill "$CONVERTER_PID" 2>/dev/null || true
     [[ -n "${FIXTURE_PID:-}" ]] && kill "$FIXTURE_PID" 2>/dev/null || true
+    [[ -n "${PREF:-}" ]] && rm -f "$PREF" "$PREF.bak"
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -39,12 +40,18 @@ pass() { echo "  ok: $*"; }
 [[ -x "$BIN" ]] || fail "build/subconverter not found; build the project first"
 
 # The binary chdir()s into its own directory, so relative preference paths resolve
-# against build/.
+# against build/. Preference snippets and bundled rules resolve the same way the
+# production image resolves them against /base.
 BIN_DIR="$(cd "$(dirname "$BIN")" && pwd)"
 [[ -e "$BIN_DIR/base" ]] || ln -s "$ROOT/base" "$BIN_DIR/base"
-cp "$ROOT/base/pref.example.toml" "$WORK/pref.toml"
+[[ -e "$BIN_DIR/snippets" ]] || ln -s "$ROOT/base/snippets" "$BIN_DIR/snippets"
+[[ -e "$BIN_DIR/rules" ]] || ln -s "$ROOT/base/rules" "$BIN_DIR/rules"
+# the binary chdir()s into the preference file's directory, so the preference must
+# live next to the linked snippets/ and rules/ for imports to resolve
+cp "$ROOT/base/pref.example.toml" "$BIN_DIR/pref.golden.toml"
+PREF="$BIN_DIR/pref.golden.toml"
 # the api port is read from the preference file, not from an environment variable
-sed -i.bak "s/^port = 25500$/port = $PORT/" "$WORK/pref.toml" && rm -f "$WORK/pref.toml.bak"
+sed -i.bak "s/^port = 25500$/port = $PORT/" "$PREF" && rm -f "$PREF.bak"
 
 if [[ -n "$SINGBOX_BIN" && -x "$SINGBOX_BIN" ]]; then
     echo "using sing-box binary: $SINGBOX_BIN ($("$SINGBOX_BIN" version 2>/dev/null | head -1))"
@@ -60,7 +67,7 @@ python3 -m http.server "$FIXTURE_PORT" >/dev/null 2>&1 &
 FIXTURE_PID=$!
 popd >/dev/null
 pushd "$BIN_DIR" >/dev/null
-"./subconverter" -f "$WORK/pref.toml" >"$WORK/converter.log" 2>&1 &
+"./subconverter" -f "$PREF" >"$WORK/converter.log" 2>&1 &
 CONVERTER_PID=$!
 popd >/dev/null
 
@@ -171,6 +178,27 @@ def check_platform(name):
     if name in ("macos", "windows", "linux") and "auto_redirect" in text:
         failures.append(f"{name}: auto_redirect is Linux-only")
 
+    # skeleton mode: minimal groups, remapped rules, remote rule-set references
+    expected_groups = {"proxy", "auto", "ChainProxyEntry", "ChainProxyExit"}
+    if name in ("macos", "windows", "linux", "openwrt"):
+        expected_groups.add("GLOBAL")
+    groups = {o["tag"] for o in doc.get("outbounds", []) if o.get("type") in ("selector", "urltest")}
+    if groups != expected_groups:
+        failures.append(f"{name}: skeleton groups {sorted(groups)} != {sorted(expected_groups)}")
+    if doc["route"].get("final") != "proxy":
+        failures.append(f"{name}: route.final {doc['route'].get('final')!r} != 'proxy'")
+    valid_targets = expected_groups | {"DIRECT"}
+    for rule in doc["route"]["rules"]:
+        if rule.get("action") == "route" and rule.get("outbound") not in valid_targets:
+            failures.append(f"{name}: rule references non-skeleton outbound {rule.get('outbound')!r}")
+    if name != "openwrt":
+        if rule_types and rule_types != {"remote"}:
+            failures.append(f"{name}: rule_set must be remote, got {sorted(rule_types)}")
+    inline_domains = sum(len(rule.get("domain", []) + rule.get("domain_suffix", []) + rule.get("domain_keyword", []))
+                         for rule in doc["route"]["rules"])
+    if inline_domains > 200:
+        failures.append(f"{name}: {inline_domains} inline domains, rule-set mapping leaked")
+
 for platform in ("macos", "windows", "linux", "android", "ios", "openwrt"):
     check_platform(platform)
 
@@ -190,10 +218,14 @@ python3 - "$WORK/chain.json" <<'PY'
 import json, sys
 doc = json.load(open(sys.argv[1]))
 detours = {o["tag"]: o["detour"] for o in doc["outbounds"] if "detour" in o}
-assert detours == {"LAND-OK": "FRONT-A"}, detours
+assert detours == {"LAND-OK": "FRONT-A", "LAND-DIAL": "ChainProxyEntry"}, detours
 for tag in ("CYC-1", "CYC-2", "DANGLE"):
     assert tag not in detours, tag
-print("  ok: valid chain kept, cycles and dangling references dropped")
+groups = {o["tag"] for o in doc["outbounds"] if o.get("type") in ("selector", "urltest")}
+assert {"proxy", "auto", "ChainProxyEntry", "ChainProxyExit", "GLOBAL"} <= groups, groups
+exit_group = next(o for o in doc["outbounds"] if o["tag"] == "ChainProxyExit")
+assert set(exit_group["outbounds"]) == {"DIRECT", "LAND-OK", "CYC-1", "CYC-2", "DANGLE", "LAND-DIAL"}, exit_group
+print("  ok: valid chain kept, dialer magic resolved, cycles and dangling references dropped")
 PY
 
 code=$(curl -s -o "$WORK/strict.txt" -w '%{http_code}' \

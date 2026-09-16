@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <map>
 #include <string>
 
 #include "handler/settings.h"
@@ -485,19 +486,80 @@ static bool isRejectGroup(const std::string &group)
     return toUpper(trim(group)) == "REJECT";
 }
 
-static void applySingBoxTarget(rapidjson::Value &rule_obj, const std::string &group, rapidjson::MemoryPoolAllocator<> &allocator)
+/// Map preference group names onto the minimal skeleton groups. Only active in
+/// skeleton mode; custom base configurations keep their original references.
+static std::string remapSingBoxGroup(const std::string &group, const singbox::Settings &settings)
+{
+    if (!settings.skeleton)
+        return group;
+    if (group == settings.proxy_tag || group == settings.direct_tag || group == settings.reject_tag
+        || group == "GLOBAL" || group == "auto" || group == "ChainProxyEntry" || group == "ChainProxyExit")
+        return group;
+    if (group == "🔰 节点选择" || group == "♻️ 自动选择" || group == "🎥 NETFLIX" || group == "🌍 国外媒体"
+        || group == "📲 电报信息" || group == "🍎 苹果服务" || group == "🐟 漏网之鱼")
+        return settings.proxy_tag;
+    if (group == "🎯 全球直连" || group == "🌏 国内媒体" || group == "Ⓜ️ 微软服务")
+        return settings.direct_tag;
+    if (group == "🛑 全球拦截" || group == "⛔️ 广告拦截" || group == "🚫 运营劫持")
+        return settings.reject_tag;
+    return settings.proxy_tag;
+}
+
+/// Map a bundled Surge list onto sing-geosite / sing-geoip rule-set tags so the
+/// generated configuration references remote .srs files instead of inlining
+/// thousands of domains. Keyed on the lowercased basename without extension.
+/// Returns false when no mapping exists (the ruleset stays inline).
+static bool mapSingBoxRuleSet(const std::string &rule_path, std::vector<singbox::RuleSetSpec> &specs)
+{
+    static const std::map<std::string, std::vector<singbox::RuleSetSpec>> table = {
+        {"localareanetwork", {{"geosite-private"}}},
+        {"msservices", {{"geosite-microsoft"}}},
+        {"adrule", {{"geosite-category-ads-all"}}},
+        {"hijacking", {{"geosite-category-ads-all"}}},
+        {"netflix", {{"geosite-netflix"}}},
+        {"streaming", {{"geosite-youtube"}, {"geosite-netflix"}, {"geosite-disney"}, {"geosite-spotify"}, {"geosite-hbo"}}},
+        {"bilibili", {{"geosite-bilibili"}}},
+        {"iqiyi", {{"geosite-iqiyi"}}},
+        {"youku", {{"geosite-youku"}}},
+        {"tencentvideo", {{"geosite-tencent"}}},
+        {"letv", {{"geosite-cn"}}},
+        {"moo", {{"geosite-cn"}}},
+        {"global", {{"geosite-geolocation-!cn"}}},
+        {"apple", {{"geosite-apple"}}},
+        {"china", {{"geosite-cn"}}},
+    };
+
+    std::string name = rule_path;
+    const std::size_t slash = name.find_last_of("/\\");
+    if (slash != std::string::npos)
+        name = name.substr(slash + 1);
+    const std::size_t dot = name.find_last_of('.');
+    if (dot != std::string::npos)
+        name = name.substr(0, dot);
+    name = toLower(replaceAllDistinct(trim(name), " ", ""));
+    if (name.empty())
+        return false;
+    auto it = table.find(name);
+    if (it == table.end())
+        return false;
+    specs = it->second;
+    return true;
+}
+
+static void applySingBoxTarget(rapidjson::Value &rule_obj, const std::string &group, rapidjson::MemoryPoolAllocator<> &allocator, const singbox::Settings &settings)
 {
     using namespace rapidjson_ext;
-    if(isRejectGroup(group))
+    const std::string target = remapSingBoxGroup(group, settings);
+    if(isRejectGroup(target))
     {
         rule_obj | AddMemberOrReplace("action", rapidjson::Value("reject", allocator), allocator);
         return;
     }
     rule_obj | AddMemberOrReplace("action", rapidjson::Value("route", allocator), allocator);
-    rule_obj | AddMemberOrReplace("outbound", rapidjson::Value(group.c_str(), allocator), allocator);
+    rule_obj | AddMemberOrReplace("outbound", rapidjson::Value(target.c_str(), allocator), allocator);
 }
 
-static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &args, const std::string& rule, const std::string &group, rapidjson::MemoryPoolAllocator<>& allocator, std::vector<singbox::RuleSetSpec> &rule_sets, bool &is_final, std::string &final_group)
+static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &args, const std::string& rule, const std::string &group, rapidjson::MemoryPoolAllocator<>& allocator, std::vector<singbox::RuleSetSpec> &rule_sets, bool &is_final, std::string &final_group, const singbox::Settings &settings)
 {
     using namespace rapidjson_ext;
     args.clear();
@@ -513,6 +575,7 @@ static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &ar
     {
         is_final = true;
         final_group = (!value.empty() && !isRejectGroup(value)) ? value : group;
+        final_group = remapSingBoxGroup(final_group, settings);
         return rapidjson::Value(rapidjson::kObjectType);
     }
 
@@ -537,7 +600,7 @@ static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &ar
         /// domain_regex are case sensitive.
         rule_obj.AddMember(rapidjson::Value(key.c_str(), allocator), rapidjson::Value(value.c_str(), allocator), allocator);
     }
-    applySingBoxTarget(rule_obj, group, allocator);
+    applySingBoxTarget(rule_obj, group, allocator, settings);
     return rule_obj;
 }
 
@@ -590,6 +653,33 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
             break;
         rule_group = x.rule_group;
         retrieved_rules = x.rule_content.get();
+
+        /// In skeleton mode, bundled Surge lists that map onto sing-geosite /
+        /// sing-geoip categories become remote rule_set references instead of
+        /// being inlined into route.rules.
+        if(settings.skeleton && !retrieved_rules.empty() && !startsWith(retrieved_rules, "[]"))
+        {
+            std::vector<singbox::RuleSetSpec> mapped_specs;
+            if(mapSingBoxRuleSet(x.rule_path, mapped_specs))
+            {
+                rapidjson::Value rule(rapidjson::kObjectType);
+                rapidjson::Value refs(rapidjson::kArrayType);
+                for(const singbox::RuleSetSpec &spec : mapped_specs)
+                {
+                    refs.PushBack(rapidjson::Value(spec.tag.c_str(), allocator), allocator);
+                    registerRuleSet(rule_sets, spec.tag, spec.geoip);
+                }
+                rule.AddMember("rule_set", refs, allocator);
+                applySingBoxTarget(rule, rule_group, allocator, settings);
+                if(!rule.ObjectEmpty())
+                {
+                    rules.PushBack(rule, allocator);
+                    total_rules++;
+                }
+                continue;
+            }
+        }
+
         if(retrieved_rules.empty())
         {
             writeLog(0, "Failed to fetch ruleset or ruleset is empty: '" + x.rule_path + "'!", LOG_LEVEL_WARNING);
@@ -600,7 +690,7 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
             strLine = retrieved_rules.substr(2);
             bool is_final = false;
             std::string final_group;
-            rapidjson::Value rule_obj = transformRuleToSingBox(temp, strLine, rule_group, allocator, rule_sets, is_final, final_group);
+            rapidjson::Value rule_obj = transformRuleToSingBox(temp, strLine, rule_group, allocator, rule_sets, is_final, final_group, settings);
             if(is_final)
             {
                 final = final_group;
@@ -637,7 +727,7 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
             appendSingBoxRule(temp, rule, strLine, allocator, rule_sets);
         }
         if (rule.ObjectEmpty()) continue;
-        applySingBoxTarget(rule, rule_group, allocator);
+        applySingBoxTarget(rule, rule_group, allocator, settings);
         rules.PushBack(rule, allocator);
     }
 

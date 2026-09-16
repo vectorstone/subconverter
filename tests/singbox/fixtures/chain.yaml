@@ -33,6 +33,13 @@ proxies:
     cipher: aes-128-gcm
     password: "test-password-e"
     dialer-proxy: "NOT-EXIST"
+  - name: "LAND-DIAL"
+    type: ss
+    server: 198.51.100.35
+    port: 8388
+    cipher: aes-128-gcm
+    password: "test-password-f"
+    dialer-proxy: "dialer"
 rules:
   - GEOIP,CN,DIRECT
   - MATCH,PROXY

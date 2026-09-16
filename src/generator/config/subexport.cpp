@@ -2984,93 +2984,164 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
         return;
     }
 
-    for (const ProxyGroupConfig &x: extra_proxy_group)
+    const bool sb_skeleton = ext.singbox_generated && !ext.nodelist;
+
+    /// Nodes declaring an upstream (dialer-proxy / underlying-proxy) are the
+    /// chain landings; every other node can serve as a chain entry.
+    string_array landing_nodes;
+    for (const auto &entry : raw_upstreams)
+        landing_nodes.emplace_back(entry.first);
+
+    if (sb_skeleton)
     {
-        string_array filtered_nodelist;
-        std::string type;
-        switch (x.Type)
+        /// Minimal skeleton: proxy / auto (+ chain groups when chained nodes
+        /// exist). Preference proxy groups are intentionally not applied; the
+        /// routing rules are remapped onto these tags (ruleconvert.cpp).
+        string_array normal_nodes;
+        for (const std::string &remark : remarks_list)
+            if (std::find(landing_nodes.begin(), landing_nodes.end(), remark) == landing_nodes.end())
+                normal_nodes.emplace_back(remark);
+
+        auto push_skeleton_group = [&](const char *type, const char *tag, const string_array &members)
         {
-            case ProxyGroupType::Select:
+            rapidjson::Value group(rapidjson::kObjectType);
+            group.AddMember("type", rapidjson::Value(type, allocator), allocator);
+            group.AddMember("tag", rapidjson::Value(tag, allocator), allocator);
+            rapidjson::Value group_outbounds(rapidjson::kArrayType);
+            std::vector<std::string> member_list;
+            for (const std::string &member : members)
             {
-                type = "selector";
-                break;
+                group_outbounds.PushBack(rapidjson::Value(member.c_str(), allocator), allocator);
+                member_list.emplace_back(member);
             }
-            case ProxyGroupType::URLTest:
-            case ProxyGroupType::Fallback:
-            case ProxyGroupType::LoadBalance:
+            if (group_outbounds.Empty())
             {
-                type = "urltest";
-                break;
+                group_outbounds.PushBack(rapidjson::Value("DIRECT", allocator), allocator);
+                member_list.emplace_back("DIRECT");
             }
-            default:
-                continue;
-        }
-        for (const auto &y : x.Proxies)
-            groupGenerate(y, nodelist, filtered_nodelist, true, ext);
+            group.AddMember("outbounds", group_outbounds, allocator);
+            if (std::string(type) == "urltest")
+            {
+                group.AddMember("url", rapidjson::Value("https://www.gstatic.com/generate_204", allocator), allocator);
+                group.AddMember("interval", rapidjson::Value("5m", allocator), allocator);
+                group.AddMember("tolerance", 50, allocator);
+            }
+            group_tag_set.insert(tag);
+            group_members[tag] = member_list;
+            outbounds.PushBack(group, allocator);
+        };
 
-        if (filtered_nodelist.empty())
-            filtered_nodelist.emplace_back("DIRECT");
-
-        rapidjson::Value group(rapidjson::kObjectType);
-
-        group.AddMember("type", rapidjson::Value(type.c_str(), allocator), allocator);
-        group.AddMember("tag", rapidjson::Value(x.Name.c_str(), allocator), allocator);
-
-        rapidjson::Value group_outbounds(rapidjson::kArrayType);
-        for (const std::string& y: filtered_nodelist)
+        push_skeleton_group("selector", "proxy", [&]{ string_array m{ "auto" }; m.insert(m.end(), normal_nodes.begin(), normal_nodes.end()); return m; }());
+        push_skeleton_group("urltest", "auto", normal_nodes);
+        if (!landing_nodes.empty())
         {
-            group_outbounds.PushBack(rapidjson::Value(y.c_str(), allocator), allocator);
+            push_skeleton_group("selector", chain_entry_group_name, [&]{ string_array m{ "auto" }; m.insert(m.end(), normal_nodes.begin(), normal_nodes.end()); return m; }());
+            push_skeleton_group("selector", dialer_group_name, [&]{ string_array m{ "DIRECT" }; m.insert(m.end(), landing_nodes.begin(), landing_nodes.end()); return m; }());
         }
-        group.AddMember("outbounds", group_outbounds, allocator);
-
-        if (x.Type == ProxyGroupType::URLTest)
+        if (global.singBoxAddClashModes)
         {
-            if (!x.Url.empty())
-                group.AddMember("url", rapidjson::Value(x.Url.c_str(), allocator), allocator);
-            const std::string interval = formatSingBoxInterval(x.Interval);
-            if (!interval.empty())
-                group.AddMember("interval", rapidjson::Value(interval.c_str(), allocator), allocator);
-            if (x.Tolerance > 0)
-                group.AddMember("tolerance", x.Tolerance, allocator);
+            /// GLOBAL backs the clash_api Global switch; only emit it on
+            /// platforms that also emit the clash_mode routing rules.
+            if (ext.singbox_settings.clash_modes && singbox::profileOf(ext.singbox_settings.platform).clash_mode_rules)
+            {
+                string_array global_members{ "DIRECT", "proxy", "auto" };
+                global_members.insert(global_members.end(), remarks_list.begin(), remarks_list.end());
+                push_skeleton_group("selector", "GLOBAL", global_members);
+            }
         }
-        group_tag_set.insert(x.Name);
-        group_members[x.Name] = filtered_nodelist;
-        outbounds.PushBack(group, allocator);
     }
-
-    if (global.singBoxAddClashModes)
+    else
     {
-        auto global_group = rapidjson::Value(rapidjson::kObjectType);
-        global_group.AddMember("type", "selector", allocator);
-        global_group.AddMember("tag", "GLOBAL", allocator);
-        global_group.AddMember("outbounds", rapidjson::Value(rapidjson::kArrayType), allocator);
-        global_group["outbounds"].PushBack("DIRECT", allocator);
-        for (auto &x: remarks_list)
+        for (const ProxyGroupConfig &x: extra_proxy_group)
         {
-            global_group["outbounds"].PushBack(rapidjson::Value(x.c_str(), allocator), allocator);
+            string_array filtered_nodelist;
+            std::string type;
+            switch (x.Type)
+            {
+                case ProxyGroupType::Select:
+                {
+                    type = "selector";
+                    break;
+                }
+                case ProxyGroupType::URLTest:
+                case ProxyGroupType::Fallback:
+                case ProxyGroupType::LoadBalance:
+                {
+                    type = "urltest";
+                    break;
+                }
+                default:
+                    continue;
+            }
+            for (const auto &y : x.Proxies)
+                groupGenerate(y, nodelist, filtered_nodelist, true, ext);
+
+            if (filtered_nodelist.empty())
+                filtered_nodelist.emplace_back("DIRECT");
+
+            rapidjson::Value group(rapidjson::kObjectType);
+
+            group.AddMember("type", rapidjson::Value(type.c_str(), allocator), allocator);
+            group.AddMember("tag", rapidjson::Value(x.Name.c_str(), allocator), allocator);
+
+            rapidjson::Value group_outbounds(rapidjson::kArrayType);
+            for (const std::string& y: filtered_nodelist)
+            {
+                group_outbounds.PushBack(rapidjson::Value(y.c_str(), allocator), allocator);
+            }
+            group.AddMember("outbounds", group_outbounds, allocator);
+
+            if (x.Type == ProxyGroupType::URLTest)
+            {
+                if (!x.Url.empty())
+                    group.AddMember("url", rapidjson::Value(x.Url.c_str(), allocator), allocator);
+                const std::string interval = formatSingBoxInterval(x.Interval);
+                if (!interval.empty())
+                    group.AddMember("interval", rapidjson::Value(interval.c_str(), allocator), allocator);
+                if (x.Tolerance > 0)
+                    group.AddMember("tolerance", x.Tolerance, allocator);
+            }
+            group_tag_set.insert(x.Name);
+            group_members[x.Name] = filtered_nodelist;
+            outbounds.PushBack(group, allocator);
         }
-        group_tag_set.insert("GLOBAL");
-        std::vector<std::string> global_members;
-        global_members.emplace_back("DIRECT");
-        global_members.insert(global_members.end(), remarks_list.begin(), remarks_list.end());
-        group_members["GLOBAL"] = global_members;
-        outbounds.PushBack(global_group, allocator);
+
+        if (global.singBoxAddClashModes)
+        {
+            auto global_group = rapidjson::Value(rapidjson::kObjectType);
+            global_group.AddMember("type", "selector", allocator);
+            global_group.AddMember("tag", "GLOBAL", allocator);
+            global_group.AddMember("outbounds", rapidjson::Value(rapidjson::kArrayType), allocator);
+            global_group["outbounds"].PushBack("DIRECT", allocator);
+            for (auto &x: remarks_list)
+            {
+                global_group["outbounds"].PushBack(rapidjson::Value(x.c_str(), allocator), allocator);
+            }
+            group_tag_set.insert("GLOBAL");
+            std::vector<std::string> global_members;
+            global_members.emplace_back("DIRECT");
+            global_members.insert(global_members.end(), remarks_list.begin(), remarks_list.end());
+            group_members["GLOBAL"] = global_members;
+            outbounds.PushBack(global_group, allocator);
+        }
     }
 
     /// Chained proxies: resolve dialer-proxy / underlying-proxy into `detour`.
     {
-        std::vector<std::string> all_tags(node_tags.begin(), node_tags.end());
-        all_tags.insert(all_tags.end(), endpoint_tags.begin(), endpoint_tags.end());
-        all_tags.emplace_back("DIRECT");
-        all_tags.emplace_back("REJECT");
-        std::vector<std::string> group_tags(group_tag_set.begin(), group_tag_set.end());
-
         std::vector<std::pair<std::string, std::string>> upstreams;
+        bool needs_entry_group = false;
         for (const auto &entry : raw_upstreams)
         {
             const std::string &raw = entry.second;
             std::string via;
-            if (node_tags.count(raw) || endpoint_tags.count(raw) || group_tag_set.count(raw))
+            if (trim(raw) == "dialer")
+            {
+                /// Magic value shared with the Clash exporter: dial through the
+                /// dedicated chain entry group.
+                via = chain_entry_group_name;
+                needs_entry_group = true;
+            }
+            else if (node_tags.count(raw) || endpoint_tags.count(raw) || group_tag_set.count(raw))
                 via = raw;
             else
             {
@@ -3080,6 +3151,37 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
             }
             upstreams.emplace_back(entry.first, via);
         }
+
+        /// Custom base configurations may lack the entry group; inject a minimal
+        /// one so a "dialer" declaration stays resolvable (skeleton mode always
+        /// creates it when chained nodes exist).
+        if (needs_entry_group && !group_tag_set.count(chain_entry_group_name))
+        {
+            string_array entry_members;
+            for (const std::string &remark : remarks_list)
+                if (std::find(landing_nodes.begin(), landing_nodes.end(), remark) == landing_nodes.end())
+                    entry_members.emplace_back(remark);
+            if (entry_members.empty())
+                entry_members.emplace_back("DIRECT");
+
+            rapidjson::Value entry_group(rapidjson::kObjectType);
+            entry_group.AddMember("type", rapidjson::Value("selector", allocator), allocator);
+            entry_group.AddMember("tag", rapidjson::Value(chain_entry_group_name, allocator), allocator);
+            rapidjson::Value entry_outbounds(rapidjson::kArrayType);
+            for (const std::string &member : entry_members)
+                entry_outbounds.PushBack(rapidjson::Value(member.c_str(), allocator), allocator);
+            entry_group.AddMember("outbounds", entry_outbounds, allocator);
+            outbounds.PushBack(entry_group, allocator);
+            group_tag_set.insert(chain_entry_group_name);
+            group_members[chain_entry_group_name] = entry_members;
+        }
+
+        std::vector<std::string> all_tags(node_tags.begin(), node_tags.end());
+        all_tags.insert(all_tags.end(), endpoint_tags.begin(), endpoint_tags.end());
+        all_tags.insert(all_tags.end(), group_tag_set.begin(), group_tag_set.end());
+        all_tags.emplace_back("DIRECT");
+        all_tags.emplace_back("REJECT");
+        std::vector<std::string> group_tags(group_tag_set.begin(), group_tag_set.end());
 
         singbox::ChainResult chain = singbox::resolveChain(all_tags, group_tags, group_members, upstreams, "DIRECT");
         for (const auto &entry : chain.detour)
@@ -3139,6 +3241,10 @@ std::string proxyToSingBox(std::vector<Proxy> &nodes, const std::string &base_co
 
     if (ext.nodelist)
         return json | SerializeObject();
+
+    /// Skeleton mode drives the minimal group remap and the remote rule-set
+    /// mapping inside rulesetToSingBox.
+    ext.singbox_settings.skeleton = ext.singbox_generated;
 
     if (ext.enable_rule_generator)
         rulesetToSingBox(json, ruleset_content_array, ext.overwrite_original_rules, ext.singbox_settings, rule_sets);

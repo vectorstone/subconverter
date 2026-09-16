@@ -82,6 +82,7 @@ struct Settings
 {
     Platform platform = Platform::MacOS;
     bool clash_modes = true;
+    bool skeleton = false;         /// generated skeleton mode: minimal groups + remote rule-set mapping
     std::string clash_api_controller = "127.0.0.1:9095";
     std::string clash_api_secret;
     std::string dns_direct_server = "223.5.5.5";
@@ -89,7 +90,7 @@ struct Settings
     std::string dns_direct_ruleset = "geosite-cn";
     std::string direct_tag = "DIRECT";
     std::string reject_tag = "REJECT";
-    std::string proxy_tag = "PROXY";
+    std::string proxy_tag = "proxy";
     std::string tun_address = "172.19.0.1/30";
     std::string tun_address6 = "fdfe:dcba:9876::1/126";
     bool ipv6 = false;
