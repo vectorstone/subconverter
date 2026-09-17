@@ -41,6 +41,9 @@
     let usageFailures = 0;
     let previewIdentity = null;
     let nextBindingsCursor = '';
+    let listTimer = 0;
+    let listInFlight = false;
+    let listFailures = 0;
 
     const el = (tag, className, text) => {
         const node = document.createElement(tag);
@@ -329,6 +332,21 @@
 
     const authHeaders = () => ({});
 
+    const shortLinkActionError = async (response, fallback) => {
+        if (response.status === 429) {
+            return new Error('请求较频繁（429），请等待 ' + retryAfterSeconds(response.headers.get('Retry-After') || '') + ' 秒后重试。');
+        }
+        const contentType = response.headers.get('Content-Type') || '';
+        const body = await response.text().catch(() => '');
+        if (contentType.includes('application/json') && body) {
+            try {
+                const data = JSON.parse(body);
+                if (data && typeof data.error === 'string' && data.error) return new Error(fallback + '：' + data.error);
+            } catch (_) { /* 保持通用提示 */ }
+        }
+        return new Error(fallback + '（' + response.status + '）');
+    };
+
     const loadPreview = async (url) => {
         preview.textContent = '加载中……';
         const response = await fetch(url, { cache: 'no-store' });
@@ -338,14 +356,53 @@
         preview.textContent = content.length > limit ? content.slice(0, limit) + '\n\n……预览已截断，完整内容请下载……' : content;
     };
 
-    const loadList = async () => {
+    const loadList = async (manual = false) => {
+        if (listInFlight) return;
+        listInFlight = true;
+        window.clearTimeout(listTimer);
         try {
             const response = await fetch('/api/short-links', { cache: 'no-store', headers: authHeaders() });
-            if (!response.ok) throw new Error((await response.text()) || ('加载失败（' + response.status + '）'));
+            if (response.status === 401) {
+                linksList.replaceChildren(el('p', 'muted', '登录状态已失效，请重新登录后查看短链。'));
+                setMessage('登录状态已失效，请重新登录。', true);
+                return;
+            }
+            if (response.status === 429) {
+                // 网关限流：保留已有列表不清空，按 Retry-After 自动重试一次。
+                listFailures += 1;
+                const seconds = retryAfterSeconds(response.headers.get('Retry-After') || '');
+                setMessage('请求较频繁，' + seconds + ' 秒后自动重试；已有短链不受影响。', true);
+                if (listFailures <= 3) {
+                    window.clearTimeout(listTimer);
+                    listTimer = window.setTimeout(() => loadList(), Math.max(1, seconds) * 1000);
+                }
+                return;
+            }
+            if (!response.ok) {
+                // 后端/网关返回 HTML 错误页（如旧 503）时不再原样展示，只给状态码。
+                const contentType = response.headers.get('Content-Type') || '';
+                const body = await response.text().catch(() => '');
+                let detail = '加载失败（' + response.status + '）';
+                if (contentType.includes('application/json') && body) {
+                    try {
+                        const data = JSON.parse(body);
+                        if (data && typeof data.error === 'string' && data.error) detail = '加载失败：' + data.error;
+                    } catch (_) { /* 保持通用提示 */ }
+                }
+                throw new Error(detail);
+            }
             const data = await response.json();
+            listFailures = 0;
             renderList(data.items || []);
         } catch (error) {
-            linksList.replaceChildren(el('p', 'muted', error.message));
+            // 网络故障等：已有列表保留，仅在从未加载成功时显示占位提示。
+            if (!linksList.children.length || linksList.querySelector('p.muted:only-child')) {
+                linksList.replaceChildren(el('p', 'muted', error.message));
+            } else {
+                setMessage(error.message + '；已保留当前列表。', true);
+            }
+        } finally {
+            listInFlight = false;
         }
     };
 
@@ -382,18 +439,34 @@
             const refresh = el('button', 'secondary', '刷新配置');
             refresh.disabled = Boolean(item.revoked_at);
             refresh.onclick = async () => {
-                const response = await fetch('/api/short-links/' + encodeURIComponent(item.id) + '/refresh', { method: 'POST', headers: authHeaders() });
-                if (!response.ok) throw new Error(await response.text());
-                await loadList();
-                if (shortUrl.value === item.short_url) await loadPreview(item.short_url);
+                refresh.disabled = true;
+                try {
+                    const response = await fetch('/api/short-links/' + encodeURIComponent(item.id) + '/refresh', { method: 'POST', headers: authHeaders() });
+                    if (!response.ok) throw await shortLinkActionError(response, '刷新失败');
+                    setMessage('刷新成功，正在重新加载列表……', false);
+                    await loadList(true);
+                    if (shortUrl.value === item.short_url) await loadPreview(item.short_url);
+                } catch (error) {
+                    setMessage(error.message, true);
+                } finally {
+                    refresh.disabled = Boolean(item.revoked_at);
+                }
             };
             const revoke = el('button', 'danger', '撤销');
             revoke.disabled = Boolean(item.revoked_at);
             revoke.onclick = async () => {
                 if (!confirm('确认撤销这条短链？')) return;
-                const response = await fetch('/api/short-links/' + encodeURIComponent(item.id), { method: 'DELETE', headers: authHeaders() });
-                if (!response.ok) throw new Error(await response.text());
-                await loadList();
+                revoke.disabled = true;
+                try {
+                    const response = await fetch('/api/short-links/' + encodeURIComponent(item.id), { method: 'DELETE', headers: authHeaders() });
+                    if (!response.ok) throw await shortLinkActionError(response, '撤销失败');
+                    setMessage('已撤销，正在重新加载列表……', false);
+                    await loadList(true);
+                } catch (error) {
+                    setMessage(error.message, true);
+                } finally {
+                    revoke.disabled = Boolean(item.revoked_at);
+                }
             };
             actions.append(copy, download, refresh, revoke);
             row.append(body, actions);
@@ -566,7 +639,7 @@
         resultCard.classList.add('hidden');
         setMessage('', false);
     };
-    $('#refresh-button').onclick = loadList;
+    $('#refresh-button').onclick = () => loadList(true);
     usageRefresh.onclick = () => loadUsage(true);
     $('#binding-refresh').onclick = () => Promise.all([loadProviders(), loadBindings(false)]);
     bindingsMore.onclick = () => loadBindings(true);
