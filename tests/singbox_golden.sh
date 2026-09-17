@@ -197,6 +197,29 @@ def check_platform(name):
         failures.append(f"{name}: skeleton groups {sorted(groups)} != {sorted(expected_groups)}")
     if doc["route"].get("final") != "proxy":
         failures.append(f"{name}: route.final {doc['route'].get('final')!r} != 'proxy'")
+
+    # `proxy` is the traffic-entry selector (route.final), so it must expose the
+    # chain landings (Clash 节点选择 parity): otherwise selecting a landing in the
+    # client can never engage the chain. `auto` / `ChainProxyEntry` must keep
+    # excluding them or landing.detour -> entry group -> landing is a cycle.
+    by_tag = {o.get("tag"): o for o in doc.get("outbounds", [])}
+    chain_exit = by_tag.get("ChainProxyExit")
+    if not chain_exit:
+        failures.append(f"{name}: ChainProxyExit missing for a chained subscription")
+    else:
+        landings = [t for t in chain_exit.get("outbounds", []) if t != "DIRECT"]
+        if not landings:
+            failures.append(f"{name}: ChainProxyExit exposes no landing node")
+        proxy_members = by_tag.get("proxy", {}).get("outbounds", [])
+        if not proxy_members or proxy_members[0] != "auto":
+            failures.append(f"{name}: proxy must keep 'auto' as its default (first) member")
+        for landing in landings:
+            if landing not in proxy_members:
+                failures.append(f"{name}: proxy does not list chain landing {landing!r}")
+            for group in ("auto", "ChainProxyEntry"):
+                if landing in by_tag.get(group, {}).get("outbounds", []):
+                    failures.append(f"{name}: landing {landing!r} in {group} would be a chain cycle")
+
     valid_targets = expected_groups | {"DIRECT"}
     for rule in doc["route"]["rules"]:
         if rule.get("action") == "route" and rule.get("outbound") not in valid_targets:
@@ -235,7 +258,16 @@ groups = {o["tag"] for o in doc["outbounds"] if o.get("type") in ("selector", "u
 assert {"proxy", "auto", "ChainProxyEntry", "ChainProxyExit", "GLOBAL"} <= groups, groups
 exit_group = next(o for o in doc["outbounds"] if o["tag"] == "ChainProxyExit")
 assert set(exit_group["outbounds"]) == {"DIRECT", "LAND-OK", "CYC-1", "CYC-2", "DANGLE", "LAND-DIAL"}, exit_group
+proxy_group = next(o for o in doc["outbounds"] if o["tag"] == "proxy")
+assert proxy_group["outbounds"][0] == "auto", proxy_group
+assert set(proxy_group["outbounds"]) == {"auto", "LAND-OK", "CYC-1", "CYC-2", "DANGLE", "LAND-DIAL", "FRONT-A"}, proxy_group
+entry_group = next(o for o in doc["outbounds"] if o["tag"] == "ChainProxyEntry")
+auto_group = next(o for o in doc["outbounds"] if o["tag"] == "auto")
+for landing in ("LAND-OK", "CYC-1", "CYC-2", "DANGLE", "LAND-DIAL"):
+    assert landing not in entry_group["outbounds"], entry_group
+    assert landing not in auto_group["outbounds"], auto_group
 print("  ok: valid chain kept, dialer magic resolved, cycles and dangling references dropped")
+print("  ok: landings selectable from proxy, excluded from auto/ChainProxyEntry")
 PY
 
 code=$(curl -s -o "$WORK/strict.txt" -w '%{http_code}' \

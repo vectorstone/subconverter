@@ -3031,7 +3031,16 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
             outbounds.PushBack(group, allocator);
         };
 
-        push_skeleton_group("selector", "proxy", [&]{ string_array m{ "auto" }; m.insert(m.end(), normal_nodes.begin(), normal_nodes.end()); return m; }());
+        /// `proxy` doubles as the traffic-entry selector (Clash `🚀 节点选择`
+        /// parity): the landings are listed right after `auto` so one can be
+        /// picked directly and dial through `ChainProxyEntry`. `auto` and the
+        /// entry group must keep excluding landings — a landing whose `detour`
+        /// points at a group that contained the landing would be a cycle, which
+        /// resolveChain() rejects as `cycle`.
+        string_array proxy_members{ "auto" };
+        proxy_members.insert(proxy_members.end(), landing_nodes.begin(), landing_nodes.end());
+        proxy_members.insert(proxy_members.end(), normal_nodes.begin(), normal_nodes.end());
+        push_skeleton_group("selector", "proxy", proxy_members);
         push_skeleton_group("urltest", "auto", normal_nodes);
         if (!landing_nodes.empty())
         {

@@ -354,6 +354,17 @@ OpenWrt 专属硬约束（来自网关现网实测 + Open-Box 引擎源码）：
 
 **与分组的关系**：`PROXY` 组通常包含全部节点，若落地 `detour` 指向 `PROXY`（或指向包含自己的组）即构成环 —— 依赖图把「组 → 成员」也作为边，因此能被 `cycle` 检出。这与 Open-Box `chain.mjs` 的判定集合一致。
 
+**骨架实际分组（2026-09-17 修正，Clash `🚀 节点选择` 平价）**：
+
+| 组 | 成员 | 说明 |
+|---|---|---|
+| `proxy`（`route.final`） | `auto` + **落地节点** + 普通节点 | 在客户端 `proxy` 组里直接选落地即可出链；`auto` 保持首位即默认值 |
+| `auto` / `ChainProxyEntry` | 仅普通节点 | 落地一旦进入，`落地.detour → ChainProxyEntry` 即构环，故必须排除 |
+| `ChainProxyExit` | `DIRECT` + 落地 | **首位 `DIRECT` 即默认值**：不手动选就是直连，客户端不会报错 |
+| `GLOBAL` | `DIRECT` + `proxy` + `auto` + 全部节点 | 仅 clash_mode Global 使用 |
+
+修正原因：修正前骨架把落地从 `proxy` 里也排除了，而 `route.final` 正是 `proxy`，于是"在客户端选落地"这条 Clash 里成立的链式操作在 sing-box 产物上**永远无法生效**（实测：`final=proxy` 时无论 `ChainProxyExit` 选什么都只有一跳）。`proxy ∋ 落地` 本身不成环，因为 `落地.detour` 指向的 `ChainProxyEntry` 不含落地；反之 `x-sc-underlying-proxy=proxy` 这类"落地指向含自己的组"仍由 `cycle` 检出并丢弃。
+
 ### 4.7 DNS 设计
 
 - 双通道：`dns-direct`（`udp`，纯 IP，无 detour）+ `dns-proxy`（`https`，纯 IP，`detour:"PROXY"`，`domain_resolver:"dns-direct"`）。
