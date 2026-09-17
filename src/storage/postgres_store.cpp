@@ -519,6 +519,23 @@ bool PostgresStore::revoke_short_link(const std::string &owner, const std::strin
     return changed;
 }
 
+bool PostgresStore::delete_short_link(const std::string &owner, const std::string &id, bool all_owners)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+    if(!connection_ || owner.empty() || id.empty())
+        return false;
+    const char *values[] = {owner.c_str(), id.c_str()};
+    PGresult *result = nullptr;
+    // short_link_versions references short_links with ON DELETE CASCADE, so the
+    // snapshot history is removed together with the row.
+    const bool ok = all_owners
+        ? exec_params(connection_, "DELETE FROM short_links WHERE id::text = $1", {values[1]}, &result)
+        : exec_params(connection_, "DELETE FROM short_links WHERE owner_subject = $1 AND id::text = $2", {values[0], values[1]}, &result);
+    const bool changed = ok && PQcmdTuples(result) && std::atoi(PQcmdTuples(result)) == 1;
+    PQclear(result);
+    return changed;
+}
+
 bool PostgresStore::update_snapshot(const std::string &owner, const std::string &id, const std::string &snapshot_payload, const std::string &response_headers, const std::string &content_hash, std::int64_t updated_at)
 {
     std::lock_guard<std::mutex> guard(mutex_);

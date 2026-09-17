@@ -516,13 +516,27 @@ std::string extract_id(const std::string &path)
     return path.substr(prefix.size());
 }
 
-std::string extract_refresh_id(const std::string &path)
+// Extracts the numeric id from "/api/short-links/<id>/<action>".
+std::string extract_action_id(const std::string &path, const std::string &action)
 {
     const std::string prefix = "/api/short-links/";
-    const std::string suffix = "/refresh";
+    const std::string suffix = "/" + action;
     if(!startsWith(path, prefix) || !endsWith(path, suffix))
         return "";
-    return path.substr(prefix.size(), path.size() - prefix.size() - suffix.size());
+    const std::string id = path.substr(prefix.size(), path.size() - prefix.size() - suffix.size());
+    if(id.empty() || !std::all_of(id.begin(), id.end(), [](unsigned char c){ return std::isdigit(c) != 0; }))
+        return "";
+    return id;
+}
+
+std::string extract_refresh_id(const std::string &path)
+{
+    return extract_action_id(path, "refresh");
+}
+
+std::string extract_delete_id(const std::string &path)
+{
+    return extract_action_id(path, "delete");
 }
 
 std::string extract_key_id(const std::string &path)
@@ -723,6 +737,21 @@ std::string revokeShortLink(RESPONSE_CALLBACK_ARGS)
         return json_error(response, 404, "short link not found");
     response.content_type = "application/json;charset=utf-8";
     return "{\"status\":\"revoked\"}";
+}
+
+std::string deleteShortLink(RESPONSE_CALLBACK_ARGS)
+{
+    if(!shortLinkServiceEnabled())
+        return json_error(response, 503, "short-link service is unavailable");
+    std::string owner;
+    bool admin = false;
+    if(!authenticate_request(request, owner, admin))
+        return json_error(response, 401, "authentication required");
+    const std::string id = extract_delete_id(request.url);
+    if(id.empty() || !store.delete_short_link(owner, id, admin))
+        return json_error(response, 404, "short link not found");
+    response.content_type = "application/json;charset=utf-8";
+    return "{\"status\":\"deleted\"}";
 }
 
 std::string refreshShortLink(RESPONSE_CALLBACK_ARGS)

@@ -63,6 +63,21 @@ if [[ "${status_code}" != "410" ]]; then
     echo 'shortlink-smoke-failed' >&2
     exit 1
 fi
+# 永久删除：撤销后的短链仍可删除，删除后短码 404、重复删除 404、列表不再包含该 id。
+delete_response=$(curl -fsS --max-time 10 -X POST --data-binary "" "${AUTH_ARGS[@]}" "${BASE_URL}/api/short-links/${id}/delete")
+grep -q 'deleted' <<<"${delete_response}"
+deleted_code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' "${url}")
+if [[ "${deleted_code}" != "404" ]]; then
+    echo "shortlink-smoke-failed: deleted short link returned ${deleted_code} instead of 404" >&2
+    exit 1
+fi
+missing_code=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST --data-binary "" "${AUTH_ARGS[@]}" "${BASE_URL}/api/short-links/${id}/delete")
+if [[ "${missing_code}" != "404" ]]; then
+    echo "shortlink-smoke-failed: deleting a missing short link returned ${missing_code} instead of 404" >&2
+    exit 1
+fi
+list_after_delete=$(curl -fsS --max-time 10 "${AUTH_ARGS[@]}" "${BASE_URL}/api/short-links")
+python3 -c 'import json,sys; data=json.load(sys.stdin); assert all(item["id"] != sys.argv[1] for item in data["items"]), data' "${id}" <<<"${list_after_delete}"
 
 # --------------------------------------------------------------- sing-box
 sb_payload='{"name":"smoke-singbox","target":"singbox","platform":"openwrt","expires_in":3600,"links":["ss://YWVzLTEyOC1nY206Zml4dHVyZQ==@198.51.100.10:443#smoke"]}'

@@ -478,7 +478,34 @@
                     revoke.disabled = Boolean(item.revoked_at);
                 }
             };
-            actions.append(copy, download, refresh, revoke);
+            const purge = el('button', 'danger', '删除');
+            purge.title = '永久删除这条短链及其历史快照';
+            purge.onclick = async () => {
+                const warning = item.revoked_at
+                    ? '确认永久删除这条短链？删除后无法恢复。'
+                    : '这条短链仍然有效，删除后订阅客户端会立即失效。确认永久删除？';
+                if (!confirm(warning)) return;
+                purge.disabled = true;
+                let deleted = false;
+                try {
+                    const response = await fetch('/api/short-links/' + encodeURIComponent(item.id) + '/delete', { method: 'POST', headers: authHeaders() });
+                    if (!response.ok) throw await shortLinkActionError(response, '删除失败');
+                    deleted = true;
+                    if (shortUrl.value === item.short_url) {
+                        shortUrl.value = '';
+                        preview.textContent = '';
+                        resultCard.classList.add('hidden');
+                    }
+                    setMessage('已删除，正在重新加载列表……', false);
+                    await loadList(true);
+                } catch (error) {
+                    setMessage(error.message, true);
+                } finally {
+                    // 删除成功后保持禁用，避免在列表尚未刷新时重复提交。
+                    purge.disabled = deleted;
+                }
+            };
+            actions.append(copy, download, refresh, revoke, purge);
             row.append(body, actions);
             linksList.append(row);
         }

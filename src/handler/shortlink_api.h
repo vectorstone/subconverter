@@ -22,6 +22,7 @@ PostgresStore &shortLinkStore();
 std::string createShortLink(RESPONSE_CALLBACK_ARGS);
 std::string listShortLinks(RESPONSE_CALLBACK_ARGS);
 std::string revokeShortLink(RESPONSE_CALLBACK_ARGS);
+std::string deleteShortLink(RESPONSE_CALLBACK_ARGS);
 std::string refreshShortLink(RESPONSE_CALLBACK_ARGS);
 std::string createShortLinkApiKey(RESPONSE_CALLBACK_ARGS);
 std::string revokeShortLinkApiKey(RESPONSE_CALLBACK_ARGS);

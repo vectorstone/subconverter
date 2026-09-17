@@ -135,7 +135,7 @@ The built-in default Clash chain config keeps `♻️ 自动选择` as a `url-te
 
 ## Web UI Short Links (PostgreSQL)
 
-With `SHORTLINK_ENABLED=true`, `DATABASE_URL`, and `SHORTLINK_ENCRYPTION_KEY` configured, the service provides a Cloudflare Access-protected Web UI and PostgreSQL-backed short-link API. `GET /s/<code>` remains public and returns Clash YAML directly; create, list, refresh, and revoke require Cloudflare Access or a user API key.
+With `SHORTLINK_ENABLED=true`, `DATABASE_URL`, and `SHORTLINK_ENCRYPTION_KEY` configured, the service provides a Cloudflare Access-protected Web UI and PostgreSQL-backed short-link API. `GET /s/<code>` remains public and returns Clash YAML directly; create, list, refresh, revoke, and delete require Cloudflare Access or a user API key. `DELETE /api/short-links/<id>` revokes a link (the code then returns 410) while `POST /api/short-links/<id>/delete` permanently removes the row and its refresh history.
 
 Short links use the Lite Clash conversion profile by default: `SHORTLINK_CLASH_CONFIG=config/default_clash_lite.ini` and `SHORTLINK_CLASH_EXPAND=false`. The service selects the profile per target, disables inserts, and does not accept an arbitrary per-request `config` from Web UI/API users. This keeps stored Clash snapshots small by emitting remote rule providers instead of embedding the complete rule contents. `SHORTLINK_LITE_MAX_OUTPUT_BYTES` defaults to 262144 and rejects an unexpectedly large Lite snapshot before it is stored.
 

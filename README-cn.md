@@ -1493,9 +1493,9 @@ http://127.0.0.1:25500/getruleset?type=%TYPE%&url=%URL%&group=%GROUP%
 
 ### Web UI 短链（PostgreSQL）
 
-启用 SHORTLINK_ENABLED=true 并配置 DATABASE_URL、SHORTLINK_ENCRYPTION_KEY 后，服务会提供根路径 Web UI 和 PostgreSQL 短链接口。Web UI 通过 Cloudflare Access 登录，用于输入多个节点/机场链接、生成 Clash 配置快照、复制短链、预览、下载、刷新和撤销；普通页面不显示 API Key 输入框，API Key 保留给自动化调用。
+启用 SHORTLINK_ENABLED=true 并配置 DATABASE_URL、SHORTLINK_ENCRYPTION_KEY 后，服务会提供根路径 Web UI 和 PostgreSQL 短链接口。Web UI 通过 Cloudflare Access 登录，用于输入多个节点/机场链接、生成 Clash 配置快照、复制短链、预览、下载、刷新、撤销和删除；普通页面不显示 API Key 输入框，API Key 保留给自动化调用。
 
-短链读取地址为 /s/<code>，直接返回 Clash YAML，不使用重定向，因此可以直接填写到 Clash Verge、mihomo/OpenClash 等客户端。短链读取不要求登录；创建、列表、刷新和撤销接口必须通过 Cloudflare Access 或用户 API Key 鉴权。
+短链读取地址为 /s/<code>，直接返回 Clash YAML，不使用重定向，因此可以直接填写到 Clash Verge、mihomo/OpenClash 等客户端。短链读取不要求登录；创建、列表、刷新、撤销和删除接口必须通过 Cloudflare Access 或用户 API Key 鉴权。`DELETE /api/short-links/<id>` 是撤销（短码随后返回 410），`POST /api/short-links/<id>/delete` 是永久删除（连同刷新历史一起删除，短码随后返回 404），两者都不可恢复。
 
 短链采用快照模式。已有短链可以作为新的 HTTPS 输入源，与其他 SS、VLESS、TUIC 或机场订阅合并后生成新的短链。短链内容、过期时间和撤销状态保存在 PostgreSQL 中，节点凭据通过 SHORTLINK_ENCRYPTION_KEY 加密。
 
@@ -1505,7 +1505,7 @@ http://127.0.0.1:25500/getruleset?type=%TYPE%&url=%URL%&group=%GROUP%
 
 这两个环境变量也是配置回滚开关。若要让**新建或刷新**的短链临时使用旧的展开式链式配置，可设置 `SHORTLINK_CLASH_CONFIG=config/default_clash_chainproxy.ini` 和 `SHORTLINK_CLASH_EXPAND=true` 后重启服务；恢复 Lite 值并重启即可重新启用 Lite。读取已有快照不会重新转换，因此历史快照（包括 Lite 上线前的旧快照）会原样兼容下载。只有显式调用 `POST /api/short-links/<id>/refresh` 时，才会从该短链加密保存的原始来源，按**刷新当时**的 Lite/回滚设置重新计算并写入该短链；刷新 A 不会隐式改变依赖 A 的短链 B。
 
-管理员通过 API_TOKEN 或 SHORTLINK_ADMIN_SUBJECTS（Cloudflare Access 邮箱/subject 白名单）识别。管理员可以查看、刷新和撤销所有用户的短链，并通过 /api/admin/users 管理用户角色；普通用户只能管理自己的短链。普通用户也可以创建永久短链，但仍受有效数量和限流配额约束。
+管理员通过 API_TOKEN 或 SHORTLINK_ADMIN_SUBJECTS（Cloudflare Access 邮箱/subject 白名单）识别。管理员可以查看、刷新、撤销和删除所有用户的短链，并通过 /api/admin/users 管理用户角色；普通用户只能管理自己的短链。普通用户也可以创建永久短链，但仍受有效数量和限流配额约束。
 
 生产部署请使用独立 PostgreSQL database/role，设置 api_mode=true，并为 /、/api/ 配置登录和限流；/s/ 与原有 /sub 需要保持客户端可访问但禁止缓存。详细接口、数据模型和部署步骤见 docs/short-link-postgresql-plan.md。
 

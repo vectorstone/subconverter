@@ -86,7 +86,7 @@ Lite 模式避免把远端规则全文写入快照，生成 `rule-providers` 和
 路由边界：
 
 - /：Web UI，必须登录。
-- /api/short-links：创建、列表、刷新、撤销，必须鉴权。
+- /api/short-links：创建、列表、刷新、撤销、删除，必须鉴权。
 - /s/<code>：公开读取，短码本身作为 Bearer Credential。
 - /sub：原有长链转换接口，保持兼容。
 - /version：健康检查。
@@ -134,14 +134,15 @@ GET /s/<code>
 - download=1 时增加 Content-Disposition。
 - 下载文件名固定为 custom-clash-YYMMDD.yaml；同一短日期存在多个配置时，从 -1、-2 依次编号。日期取当前快照的最后更新时间（updated_at）。
 
-短码不存在、已撤销或已过期时返回 410 Gone。
+短码不存在时返回 404 Not Found；已撤销或已过期时返回 410 Gone。
 
 ### 5.3 管理接口
 
 - GET /api/short-links：只列出当前用户的短链。
 - GET /api/short-links 的每条记录同时返回 short_url 和 download_url，后者下载当前快照。
 - POST /api/short-links/<id>/refresh：重新生成指定短链快照。
-- DELETE /api/short-links/<id>：撤销自己的短链。
+- DELETE /api/short-links/<id>：撤销自己的短链（保留记录，`/s/<code>` 变为 410）。
+- POST /api/short-links/<id>/delete：永久删除自己的短链及其历史快照（`short_link_versions` 随外键级联删除，`/s/<code>` 变为 404）；有效和已撤销的短链都可以删除，删除后无法恢复。
 - POST /api/keys：创建用户 API Key。
 - DELETE /api/keys/<id>：撤销自己的 API Key。
 
@@ -185,7 +186,7 @@ GET /s/<code>
 
 Access 用户首次访问 API 时会自动写入 shortlink_users；如果 subject 在白名单中，则角色为 admin。管理员也可以通过 PostgreSQL shortlink_users.role 持久化角色。
 
-管理员调用 GET /api/short-links 时可以查看全部短链，调用 DELETE/refresh 接口时可以管理其他用户的短链。GET /api/admin/users 查看用户，POST /api/admin/users 使用 subject、email 和 role 字段新增、提升或降级用户。普通用户只能查看和修改自己的记录。
+管理员调用 GET /api/short-links 时可以查看全部短链，调用 DELETE/refresh/delete 接口时可以管理其他用户的短链。GET /api/admin/users 查看用户，POST /api/admin/users 使用 subject、email 和 role 字段新增、提升或降级用户。普通用户只能查看和修改自己的记录。
 
 ## 7. PostgreSQL 数据模型
 
@@ -197,7 +198,7 @@ api_keys：用户 ID、Key 哈希、名称、创建时间、过期时间、撤�
 
 short_links：所有者、随机短码、名称、目标格式、状态、来源密文、快照密文、内容类型、内容哈希、节点数量、创建/更新时间、过期/撤销时间、访问统计。
 
-short_link_versions：短链刷新历史、版本号、快照密文、内容哈希和创建时间。
+short_link_versions：短链刷新历史、版本号、快照密文、内容哈希和创建时间；随 `short_links` 行删除而级联清理。
 
 user_quotas：每用户最大有效短链、每小时创建次数、输入大小和节点数量限制。
 

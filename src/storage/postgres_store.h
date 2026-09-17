@@ -63,6 +63,7 @@ public:
     bool list_short_links(const std::string &owner, std::vector<ShortLinkRecord> &records, bool all_owners = false);
     bool get_download_sequence(const ShortLinkRecord &record, int &sequence);
     bool revoke_short_link(const std::string &owner, const std::string &id, bool all_owners = false);
+    bool delete_short_link(const std::string &owner, const std::string &id, bool all_owners = false);
     bool update_snapshot(const std::string &owner, const std::string &id, const std::string &snapshot_payload, const std::string &response_headers, const std::string &content_hash, std::int64_t updated_at);
 
     bool usage_user_exists(const std::string &owner);

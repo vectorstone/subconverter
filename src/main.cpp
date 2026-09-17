@@ -274,6 +274,7 @@ int main(int argc, char *argv[])
     webServer.append_response("POST", "/api/short-links", "application/json;charset=utf-8", createShortLink);
     webServer.append_response("GET", "/api/short-links", "application/json;charset=utf-8", listShortLinks);
     webServer.append_response("DELETE", R"(/api/short-links/[0-9]+)", "application/json;charset=utf-8", revokeShortLink);
+    webServer.append_response("POST", R"(/api/short-links/[0-9]+/delete)", "application/json;charset=utf-8", deleteShortLink);
     webServer.append_response("POST", R"(/api/short-links/[0-9]+/refresh)", "application/json;charset=utf-8", refreshShortLink);
     webServer.append_response("POST", "/api/keys", "application/json;charset=utf-8", createShortLinkApiKey);
     webServer.append_response("DELETE", R"(/api/keys/[0-9]+)", "application/json;charset=utf-8", revokeShortLinkApiKey);
