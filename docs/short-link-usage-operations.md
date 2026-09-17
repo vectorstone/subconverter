@@ -29,10 +29,13 @@ python3 tests/shortlink_usage_integration.py --binary build/subconverter --adapt
 bash tests/usage_schema_smoke.sh
 python3 tests/usage_schema_failure.py --binary build/subconverter
 PLAYWRIGHT_PATH=/path/to/node_modules/playwright node tests/shortlink_usage_ui.cjs
+PLAYWRIGHT_PATH=/path/to/node_modules/playwright node tests/shortlink_portal_actions_ui.cjs
 git diff --check
 ```
 
 UI 测试自启 loopback 服务，使用合成 API，覆盖 1440px/390px、超大整数、错误状态和管理员完整绑定流程。`--serve --port 25501` 可保留集成测试的合成账号页面供本机检查；不要把开发账号配置用于生产。
+
+`tests/shortlink_portal_actions_ui.cjs` 覆盖短链行操作与网关故障：永久删除调用 `POST /api/short-links/<id>/delete`、网关 429 保留列表并按短退避重试、任何 503/429 的 HTML 错误页都不会进入列表/预览/消息区、管理员表单失败只显示状态码且不产生 unhandled rejection。
 
 迁移故障测试同样需要新的空白本机数据库，故意创建不兼容的 usage 表，再验证用量初始化失败后共享连接已回滚、旧短链全流程仍可用。
 
@@ -44,7 +47,11 @@ UI 测试自启 loopback 服务，使用合成 API，覆盖 1440px/390px、超�
 4. 安装 `deploy/sui-usage-firewall.service`、适配器 systemd 单元及专用 nft 表。修改 firewall 示例的来源 IP 为短链主机实际出口 IP。只放行来源到 8443，不改现有 s-ui 管理端口规则。
 5. 运行 `nft -c -f /etc/sui-usage-adapter/firewall.nft`、`systemd-analyze verify`，再 `systemctl enable --now sui-usage-adapter`。不重启 s-ui。
 6. 在短链主机安装 Access 验证器，配置实际 issuer 与 Access 应用 AUD。启动后 `/healthz` 应为 204，无 JWT 的 `/verify` 应为 401。
-7. 备份并安装 `deploy/nginx/hi.example.com.conf`，通过 `nginx -t` 后 reload。`/api/` 的邮件头只能来自验证器，显式 API Key/Bearer 仍由 C++ 验证。`SHORTLINK_TRUST_ACCESS_HEADER=true` 只可用于该受保护源站，禁止把后端端口暴露公网。
+7. 备份并安装 `deploy/nginx/` 下的三个文件，`nginx -t` 通过后 reload：
+   - `50-subconverter-limit.conf`：http 上下文的 `limit_req_zone` 与 429 用的 `map`，必须放在 `conf.d/` 或其它 http 级 include，放进 `server {}` 会让 `nginx -t` 直接失败；
+   - `20-cloudflare-realip.conf`：按 Cloudflare 官方网段恢复真实客户端 IP，否则 `limit_req` 按边缘节点 IP 统计，多用户互相挤占配额；
+   - `hi.example.com.conf`：站点配置（`/api/`、`/s/`、`/sub` 的反代与限流）。
+   `/api/` 的邮件头只能来自验证器，显式 API Key/Bearer 仍由 C++ 验证。`SHORTLINK_TRUST_ACCESS_HEADER=true` 只可用于该受保护源站，禁止把后端端口暴露公网。
 8. 把 `providers.json`、CA、客户端证书和私钥放在 `/opt/subconverter/usage/`。Provider JSON 合约见 `deploy/usage-providers.example.json`；私钥 0600。容器以只读方式挂载到 `/run/usage/`。
 9. 使用 `docker-compose.usage.yml` 叠加到现有 Compose。`PUBLIC_BASE_URL` 必须等于实际门户 Origin，不能带末尾斜杠。先设置 `SHORTLINK_USAGE_ENABLED=false`，只更新 subconverter，检查 `/version` 和旧快照。
 10. 设置 `SHORTLINK_USAGE_ENABLED=true` 并仅重建 subconverter。启动时增量创建 `002_usage.sql` 三表，不修改原表或 s-ui 数据。初始化失败时用量返回 503，短链仍工作。
@@ -53,6 +60,15 @@ UI 测试自启 loopback 服务，使用合成 API，覆盖 1440px/390px、超�
 可用的环境配置：`SHORTLINK_USAGE_POLL_SECONDS=30`、`SHORTLINK_USAGE_FRESH_SECONDS=60`、`SHORTLINK_USAGE_STALE_SECONDS=900`、`SHORTLINK_USAGE_AUDIT_DAYS=90`。每用户最多 10 个有效绑定；单次适配查询最多 100 个 Client。
 
 证书默认叶子有效期 1 年；提前至少 30 天检查并续期。换叶子证书时保留 CA 和客户端 URI SAN `spiffe://subconverter/usage-client`，重启适配器并重建短链容器以加载新证书。不要通过 `-k` 或关闭 TLS 验证解决证书故障。
+
+## 反向代理、限流与真实 IP
+
+- 三个 nginx 片段必须一起安装（见部署顺序第 7 步）。`50-subconverter-limit.conf` 与 `20-cloudflare-realip.conf` 是 http 上下文配置（`limit_req_zone`、`map`、`set_real_ip_from`），只能被 `conf.d/*.conf` 这类 http 级 include 加载；`hi.example.com.conf` 是 vhost。文件名前缀只为可读，不影响这些指令的生效。
+- 限流语义：`/api/` 为 `60r/m burst=20 nodelay`，`/s/` 与 `/sub` 共用另一个 `60r/m burst=20 nodelay` 桶。超限统一返回 **429**（`limit_req_status 429`）并带 `Retry-After: 2`。nginx 的 `limit_req` 默认返回 503 且不带 `Retry-After`，门户会把网关 HTML 误当成后端故障，`loadPreview` 之类的旧代码还会把整页 HTML 显示出来；因此三个 location 都要保留 `limit_req_status` 与 `add_header Retry-After $subconverter_retry_after always`。
+- 503 留给真实故障：后端不可用时返回 JSON `{"error":"short-link service is unavailable"}`。门户只显示状态码或 JSON `error`，不回显 HTML。
+- 真实 IP：`20-cloudflare-realip.conf` 只信任 <https://www.cloudflare.com/ips-v4> 与 <https://www.cloudflare.com/ips-v6> 的官方网段，再用 `CF-Connecting-IP` 还原 `$binary_remote_addr`。网段会变化，更新后 `nginx -t` 再 reload。
+- 前提：源站必须经 Cloudflare 回源。若改用 Cloudflare Tunnel，nginx 看到的源地址是 `127.0.0.1`，realip 不生效，所有用户会共用同一个限流桶；此时要么按用户维度重新限流，要么确认隧道链路已在上游限流。
+- 验证：`nginx -t`；`curl -sI https://<门户域名>/api/short-links` 观察 401/200；连续请求触发限流时应看到 `HTTP/2 429` 与 `retry-after: 2`；`grep -c 'limiting requests' /var/log/nginx/error.log` 观察命中率是否下降。
 
 ## 状态解释
 

@@ -12,7 +12,7 @@
 |---|---|
 | 镜像构建 | `scripts/Dockerfile`（Alpine 多阶段：编译 + 运行） |
 | 短链栈编排 | `docker-compose.shortlink.yml`（subconverter + PostgreSQL） |
-| 反向代理 | `deploy/nginx/*.conf`（宿主 nginx，Cloudflare 证书） |
+| 反向代理 | `deploy/nginx/*.conf`（宿主 nginx，Cloudflare 证书）。三个文件必须一起装：`50-subconverter-limit.conf` 与 `20-cloudflare-realip.conf` 是 http 上下文配置，`hi.example.com.conf` 是 vhost；步骤与限流语义见 `docs/short-link-usage-operations.md` 的部署顺序第 7 步与「反向代理、限流与真实 IP」 |
 | 环境变量样例 | `deploy/shortlink.env.example` |
 | 规则集同步 | `scripts/sync_singbox_rulesets.sh` |
 | 生成器回归 | `tests/singbox_golden.sh` |

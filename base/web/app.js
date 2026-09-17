@@ -17,6 +17,7 @@
     const resultMeta = $('#result-meta');
     const linksList = $('#links-list');
     const adminCard = $('#admin-card');
+    const adminMessage = $('#admin-message');
     const usersList = $('#users-list');
     const adminUserForm = $('#admin-user-form');
     const adminUsage = $('#admin-usage');
@@ -60,6 +61,12 @@
     const setBindingMessage = (text, error) => {
         bindingMessage.textContent = text || '';
         bindingMessage.className = 'message' + (error ? ' error' : '');
+    };
+
+    const setAdminMessage = (text, error) => {
+        if (!adminMessage) return;
+        adminMessage.textContent = text || '';
+        adminMessage.className = 'message' + (error ? ' error' : '');
     };
 
     const apiError = (response, data, fallback) => {
@@ -264,10 +271,30 @@
         usageTimer = window.setTimeout(() => loadUsage(), Math.max(1, seconds) * 1000);
     };
 
-    const retryAfterSeconds = (value) => {
+    const retryAfterSeconds = (value, fallback = 60) => {
         if (/^[0-9]+$/.test(value)) return Number.parseInt(value, 10);
         const retryAt = Date.parse(value);
-        return Number.isFinite(retryAt) ? Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)) : 60;
+        return Number.isFinite(retryAt) ? Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)) : fallback;
+    };
+
+    // 网关限流（nginx limit_req）不带 Retry-After，回退到一个短退避而不是默认的一分钟。
+    const GATEWAY_RETRY_SECONDS = 5;
+
+    // 只从 JSON 错误体里取 message；HTML 错误页（nginx 503/429）绝不回显，避免把整页 HTML 当文案。
+    const errorDetail = (response, body, fallback) => {
+        if (response.status === 429) {
+            return '请求较频繁（429），请等待 '
+                + retryAfterSeconds(response.headers.get('Retry-After') || '', GATEWAY_RETRY_SECONDS)
+                + ' 秒后重试。';
+        }
+        const contentType = response.headers.get('Content-Type') || '';
+        if (contentType.includes('application/json') && body) {
+            try {
+                const data = JSON.parse(body);
+                if (data && typeof data.error === 'string' && data.error) return fallback + '：' + data.error;
+            } catch (_) { /* 保持通用提示 */ }
+        }
+        return fallback + '（' + response.status + '）';
     };
 
     const loadUsage = async (manual = false) => {
@@ -332,26 +359,17 @@
 
     const authHeaders = () => ({});
 
-    const shortLinkActionError = async (response, fallback) => {
-        if (response.status === 429) {
-            return new Error('请求较频繁（429），请等待 ' + retryAfterSeconds(response.headers.get('Retry-After') || '') + ' 秒后重试。');
-        }
-        const contentType = response.headers.get('Content-Type') || '';
-        const body = await response.text().catch(() => '');
-        if (contentType.includes('application/json') && body) {
-            try {
-                const data = JSON.parse(body);
-                if (data && typeof data.error === 'string' && data.error) return new Error(fallback + '：' + data.error);
-            } catch (_) { /* 保持通用提示 */ }
-        }
-        return new Error(fallback + '（' + response.status + '）');
-    };
+    const shortLinkActionError = async (response, fallback) =>
+        new Error(errorDetail(response, await response.text().catch(() => ''), fallback));
 
     const loadPreview = async (url) => {
         preview.textContent = '加载中……';
         const response = await fetch(url, { cache: 'no-store' });
-        const content = await response.text();
-        if (!response.ok) throw new Error(content || ('预览失败（' + response.status + '）'));
+        const content = await response.text().catch(() => '');
+        if (!response.ok) {
+            preview.textContent = '';
+            throw new Error(errorDetail(response, content, '预览失败'));
+        }
         const limit = 200000;
         preview.textContent = content.length > limit ? content.slice(0, limit) + '\n\n……预览已截断，完整内容请下载……' : content;
     };
@@ -368,28 +386,20 @@
                 return;
             }
             if (response.status === 429) {
-                // 网关限流：保留已有列表不清空，按 Retry-After 自动重试一次。
+                // 网关限流：保留已有列表不清空，按 Retry-After（缺失时用短退避）自动重试。
                 listFailures += 1;
-                const seconds = retryAfterSeconds(response.headers.get('Retry-After') || '');
-                setMessage('请求较频繁，' + seconds + ' 秒后自动重试；已有短链不受影响。', true);
-                if (listFailures <= 3) {
+                const seconds = retryAfterSeconds(response.headers.get('Retry-After') || '', GATEWAY_RETRY_SECONDS);
+                const retrying = listFailures <= 3;
+                setMessage('请求较频繁，' + seconds + ' 秒后' + (retrying ? '自动重试' : '请手动刷新') + '；已有短链不受影响。', true);
+                if (retrying) {
                     window.clearTimeout(listTimer);
                     listTimer = window.setTimeout(() => loadList(), Math.max(1, seconds) * 1000);
                 }
                 return;
             }
             if (!response.ok) {
-                // 后端/网关返回 HTML 错误页（如旧 503）时不再原样展示，只给状态码。
-                const contentType = response.headers.get('Content-Type') || '';
-                const body = await response.text().catch(() => '');
-                let detail = '加载失败（' + response.status + '）';
-                if (contentType.includes('application/json') && body) {
-                    try {
-                        const data = JSON.parse(body);
-                        if (data && typeof data.error === 'string' && data.error) detail = '加载失败：' + data.error;
-                    } catch (_) { /* 保持通用提示 */ }
-                }
-                throw new Error(detail);
+                // 后端/网关返回 HTML 错误页（如关闭 limit_req_status 时的 503）时不再原样展示。
+                throw new Error(errorDetail(response, await response.text().catch(() => ''), '加载失败'));
             }
             const data = await response.json();
             listFailures = 0;
@@ -660,9 +670,22 @@
 
     if (adminUserForm) adminUserForm.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const response = await fetch('/api/admin/users', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()), body: JSON.stringify({ subject: $('#admin-subject').value.trim(), email: $('#admin-email').value.trim(), role: $('#admin-role').value }) });
-        if (!response.ok) throw new Error(await response.text());
-        await loadAdminUsers();
+        const submit = adminUserForm.querySelector('button[type="submit"]');
+        if (submit) submit.disabled = true;
+        try {
+            const { response, data } = await fetchJson('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ subject: $('#admin-subject').value.trim(), email: $('#admin-email').value.trim(), role: $('#admin-role').value })
+            });
+            if (!response.ok) return setAdminMessage(apiError(response, data, '保存用户失败').message, true);
+            setAdminMessage('用户已保存。', false);
+        } catch (_) {
+            setAdminMessage('保存用户失败，请稍后重试。', true);
+        } finally {
+            if (submit) submit.disabled = false;
+        }
+        await loadAdminUsers().catch(() => {});
     });
 
     document.addEventListener('visibilitychange', () => {
