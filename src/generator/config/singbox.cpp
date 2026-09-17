@@ -241,28 +241,32 @@ std::string platformList()
 
 const Profile &profileOf(Platform platform)
 {
+    // No platform emits tun `stack`: the value is deprecated in sing-box 1.15.0
+    // and removed in 1.17.0, and `gvisor`/`mixed` additionally hard-fail on every
+    // client built without `with_gvisor` (all official Apple clients). Omitting
+    // the field lets each kernel pick its best available implementation.
     static const Profile macos_profile = {
-        true, true, 9000, "mixed", true, true, false, false, false, false,
+        true, true, 9000, true, true, false, false, false, false,
         true, true, true, "", false, "warn", true, "prefer_ipv4"
     };
     static const Profile windows_profile = {
-        true, true, 9000, "mixed", true, true, false, false, false, false,
+        true, true, 9000, true, true, false, false, false, false,
         true, true, true, "", false, "warn", true, "prefer_ipv4"
     };
     static const Profile linux_profile = {
-        true, true, 9000, "mixed", true, true, false, false, false, false,
+        true, true, 9000, true, true, false, false, false, false,
         true, true, true, "", false, "warn", true, "prefer_ipv4"
     };
     static const Profile android_profile = {
-        false, true, 8500, "mixed", false, false, false, true, false, true,
+        false, true, 8500, false, false, false, true, false, true,
         false, false, false, "", false, "warn", true, "prefer_ipv4"
     };
     static const Profile ios_profile = {
-        false, true, 8500, "system", false, false, false, true, false, false,
+        false, true, 8500, false, false, false, true, false, false,
         false, false, false, "", false, "warn", true, "prefer_ipv4"
     };
     static const Profile openwrt_profile = {
-        false, true, 9000, "mixed", true, true, true, false, true, false,
+        false, true, 9000, true, true, true, false, true, false,
         true, true, true, "/opt/open-box/data/cache.db", true, "warn", false, "ipv4_only"
     };
 
@@ -373,7 +377,6 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
             tun.AddMember("auto_route", true, allocator);
             if(profile.tun_strict_route)
                 tun.AddMember("strict_route", true, allocator);
-            tun.AddMember("stack", makeString(profile.tun_stack, allocator), allocator);
             if(profile.tun_auto_redirect)
                 tun.AddMember("auto_redirect", true, allocator);
             if(profile.tun_dns_hijack)

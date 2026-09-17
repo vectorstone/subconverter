@@ -117,6 +117,16 @@ def check_platform(name):
     for field in removed:
         if f'"{field}"' in text:
             failures.append(f"{name}: removed field {field} present")
+
+    # The tun `stack` field is deprecated in 1.15.0 and removed in 1.17.0, and the
+    # `gvisor`/`mixed` values hard-fail at runtime on any client built without
+    # `with_gvisor` (all official Apple clients reject them, while a locally
+    # installed CLI usually has the tag and checks clean). Assert on the structure
+    # instead of relying on the local kernel build.
+    for inbound in doc.get("inbounds", []):
+        if inbound.get("type") == "tun" and "stack" in inbound:
+            failures.append(f"{name}: tun stack {inbound['stack']!r} must not be emitted")
+
     if '"type": "dns"' in text or '"type": "block", "tag": "REJECT"' in text and name == "android":
         pass
     if any(o.get("type") == "dns" for o in doc.get("outbounds", [])):

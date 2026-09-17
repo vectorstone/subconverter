@@ -56,7 +56,6 @@ struct Profile
     bool mixed_inbound;
     bool tun_inbound;
     int tun_mtu;
-    const char *tun_stack;
     bool route_auto_detect_interface;
     bool tun_strict_route;
     bool tun_auto_redirect;

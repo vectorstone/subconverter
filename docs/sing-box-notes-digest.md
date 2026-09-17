@@ -121,8 +121,12 @@
 | DNS 处理 | `dns_mode: native` 可写接口 DNS | App 把 `dns_address` 变成 tunnel DNS | `VpnService.addDnsServer()` | 自身即网关：`hijack-dns` + dnsmasq 接管 + 防火墙重定向 |
 | `route_address_set` | ✅ | ✅ | ❌ **会 `DeadSystemException`** | ✅ 预匹配可用 |
 | per-app 分流 | `process_name` | ❌ | ✅ `package_name`（`include_package` 与 `exclude_package` **不可同时非空**） | `include_uid`/`source_mac_address` |
-| TUN `stack` | `system` 或 `mixed` | `gvisor`/`mixed`（**存疑**） | `gvisor`/`mixed` | `system` 或 `mixed` |
-| 构建标签 | 官方包齐全 | App 内置，用户不可换 | App 内置 | 官方包含 `with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,with_tailscale…`（**不含 `with_grpc`**） |
+| TUN `stack` | `system` 或 `mixed` | **仅 `system` / 省略**（已证伪，见下） | **仅 `system` / 省略** | `system` 或 `mixed` |
+| 构建标签 | 官方包齐全 | **不含 `with_gvisor`（二进制实测）** | App 内置，用户不可换 | 官方包含 `with_gvisor,with_quic,with_dhcp,with_wireguard,with_utls,with_clash_api,with_tailscale…`（**不含 `with_grpc`**） |
+
+> **`stack` 结论（2026-09，二进制实测）**：官方 Apple 客户端内核**不带 `with_gvisor`**。对 SFM 1.15.1000 的 `Library.framework` 做 `strings` 核验：`stack_gvisor_stub.go` 命中 2 次，而 `sagernet/gvisor`、`stack_gvisor.go`、`stack_mixed.go` 命中均为 **0**；正对照（Homebrew CLI，带 `with_gvisor`）的 `sagernet/gvisor` 命中 7209 次。因此 `stack: "mixed"`（= system TCP + gVisor UDP）与 `"gvisor"` 在官方客户端上**必然启动失败**，报 `gVisor is not included in this build, rebuild with -tags with_gvisor`；只有 `system` 与「省略」可用。
+>
+> 两个推论：① 本机 `sing-box check` 通过**不能**证明客户端可用——本机 CLI 恰好带该标签（假绿，golden 测试曾因此长期放过此缺陷）；② `stack` 在 1.15.0 已废弃、1.17.0 移除，故**省略是唯一同时满足 1.14/1.15/1.17 与全部官方客户端的选择**。SFM 另有一条约束：开启 `includeAllNetworks` 时栈被强制为 `gvisor`，此时 `system`/`mixed` 反而不可用。
 
 ### 2.4 各平台精确增量片段
 
@@ -133,7 +137,7 @@
 "inbounds": [
   { "type": "tun", "tag": "tun-in",
     "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-    "mtu": 9000, "stack": "mixed",
+    "mtu": 9000,
     "auto_route": true, "strict_route": false }
   // ⚠ 删掉 auto_redirect 与 exclude_interface（仅 Linux）
 ],
@@ -146,7 +150,7 @@
 "inbounds": [
   { "type": "tun", "tag": "tun-in",
     "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-    "mtu": 9000, "stack": "mixed",
+    "mtu": 9000,
     "auto_route": true,
     "dns_mode": "hijack",
     "dns_address": ["<TUN_PEER_IP>", "<TUN_PEER_IP6>"] }   // 1.14+；旧客户端报未知字段
@@ -162,7 +166,7 @@
 "inbounds": [
   { "type": "tun", "tag": "tun-in",
     "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-    "mtu": 8500, "stack": "mixed",
+    "mtu": 8500,
     "auto_route": true,
     "dns_mode": "hijack", "dns_address": ["<TUN_PEER_IP>", "<TUN_PEER_IP6>"] }
 ],
@@ -178,7 +182,7 @@
   { "type": "tun", "tag": "tun-in",
     "interface_name": "singtun0",
     "address": ["172.19.0.1/30"],
-    "mtu": 9000, "stack": "mixed",
+    "mtu": 9000,
     "auto_route": true,
     "auto_redirect": true,
     "strict_route": true,
@@ -711,7 +715,6 @@ sing-box rule-set decompile my.srs
       "mtu": 9000,
       "auto_route": true,
       "strict_route": true,
-      "stack": "mixed",
       // ↓↓↓ 仅 Linux（路由器）有效；macOS 上必须删掉这两行，否则 check 直接失败
       "auto_redirect": true,
       "exclude_interface": ["br-lan", "pppoe-wan"]
@@ -802,8 +805,7 @@ sing-box rule-set decompile my.srs
 
 **macOS 版要删掉的两行**
 ```diff
-       "stack": "mixed",
--      "auto_redirect": true,
+ -      "auto_redirect": true,
 -      "exclude_interface": ["br-lan", "pppoe-wan"]
 ```
 理由：`auto_redirect` 只在 Linux 有效，macOS 上 `check` 会失败（`initialize auto-redirect: invalid argument`）；`exclude_interface` 也只在 Linux 有意义。
@@ -865,7 +867,7 @@ for f in *.srs; do printf '%s %s\n' "$(wc -c <"$f")" "$f"; done
   },
   "inbounds": [
     { "type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30"],
-      "auto_route": true, "strict_route": true, "stack": "mixed" }
+      "auto_route": true, "strict_route": true }
   ],
   "outbounds": [
     { "type": "selector", "tag": "PROXY", "outbounds": ["node1", "direct"] },
@@ -909,7 +911,7 @@ for f in *.srs; do printf '%s %s\n' "$(wc -c <"$f")" "$f"; done
   },
   "inbounds": [
     { "type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30"],
-      "auto_route": true, "strict_route": true, "stack": "mixed" }
+      "auto_route": true, "strict_route": true }
   ],
   "outbounds": [
     { "type": "selector", "tag": "PROXY", "outbounds": ["节点A", "direct"] },
@@ -1265,7 +1267,7 @@ curl -sS -H 'Authorization: Bearer <SECRET>' http://127.0.0.1:9095/connections \
 
 1. **`block` 出站是否真已移除**：官方 deprecated 页写"已在 1.13.0 移除"，但用官方 **1.14.0** 实测 `{"type":"block"}` **仍能通过 `check`**。→ 以实测为准：能用但已无语义，一律改用 `action: "reject"`。
 2. **DNS 规则引用仅含 `ip_cidr` 的规则集且未设 `match_response`**：官方 migration 页称会在启动时被拒绝，但笔记构造的用例**没有报错**（只有 `ip_version`/`query_type` 与旧地址过滤字段混用才硬失败）。→ 触发条件比文档描述更窄，**标记为待复核**。
-3. **iOS 上 `stack` 该选 `gvisor` 还是 `mixed`**：官方没给对比依据，社区建议不一。→ **存疑**。
+3. ~~**iOS 上 `stack` 该选 `gvisor` 还是 `mixed`**~~ → **已解决（2026-09，二进制实测）**：**两个都不能选**。官方 Apple 客户端内核不含 `with_gvisor`，`gvisor`/`mixed` 均启动即失败；只有 `system` 或省略可用。由于该选项在 1.15 废弃、1.17 移除，**统统一律省略**（见 §2.3 的 `stack` 结论）。
 4. **Apple 客户端对"未实现字段"（`strict_route`、`include_uid` 等）是静默忽略还是报错**：官方文档未说明。→ 建议**直接不写**，不要赌它被忽略。
 5. **`route_address_set` 在 Android 图形客户端会崩**（`DeadSystemException`），但文档**没写具体阈值**；不要在大规模路由场景依赖它。
 6. **`store_fakeip` 在 1.14 的实际行为**（是否真的持久化了 fakeip 映射）→ 未确认。

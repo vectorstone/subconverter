@@ -177,9 +177,17 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 | `rule_set` | remote `.srs` + `update_interval` | remote | remote | remote | remote | **local `.srs` 绝对路径** |
 | `log` | `{level:"warn",timestamp:true}` | 同 | 同 | `{level:"warn"}` | 同 | **`{level:"warn"}`，无 output（走 syslog）** |
 | `mtu` | 9000 | 9000 | 9000 | 8500 | 8500 | 9000 |
-| `stack` | `mixed` | `mixed` | `mixed` | `mixed` | `system`（移动端 gvisor 支持不确定，取保守值） | `mixed` |
+| `stack` | 不输出（原 `mixed`） | 同 | 同 | 同 | 同 | 同 |
 
-> `stack` 在 1.14 完全可用（1.15 起才废弃、计划 1.17 移除），因此现在照常输出。
+> ~~`stack` 在 1.14 完全可用（1.15 起才废弃、计划 1.17 移除），因此现在照常输出。~~
+>
+> **已作废（实测修正）**：该判断只看了版本，漏了**客户端构建标签**。官方 Apple 客户端（SFM，内核 1.15.1000）编译时**不带 `with_gvisor`**——`strings` 核验其内核只有 `sing-tun/stack_gvisor_stub.go`，`sagernet/gvisor`、`stack_mixed.go` 命中为 0——而 `mixed`(=system TCP + gVisor UDP) 与 `gvisor` 在 `!with_gvisor` 下共用同一个桩报错：
+>
+> ```
+> start inbound/tun[tun-in]: gVisor is not included in this build, rebuild with -tags with_gvisor
+> ```
+>
+> 本机 `sing-box check` 之所以通过，是因为 Homebrew CLI 恰好带 `with_gvisor`（假绿）。因此**所有平台一律不输出 `stack`**：省略时 1.14 自动回退（带 gvisor → `mixed`，不带 → `system`），1.15+ 使用 sing-tun 自有 TCP/IP 栈，1.17 移除后同样安全。`tests/singbox_golden.sh` 已加断言禁止任何 tun `stack` 字段。
 
 ### 4.3 通用骨架（平台无关部分）
 
@@ -235,7 +243,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 ```jsonc
 "inbounds": [
   { "type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],
-    "mtu":9000,"stack":"mixed","auto_route":true,"strict_route":true },
+    "mtu":9000,"auto_route":true,"strict_route":true },
   { "type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080 }
 ]
 ```
@@ -249,7 +257,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 ```jsonc
 "inbounds": [
   { "type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],
-    "mtu":8500,"stack":"mixed","auto_route":true,
+    "mtu":8500,"auto_route":true,
     "dns_mode":"hijack","dns_address":["<TUN_PEER_IP>"] }   // tun 网段 +1
 ],
 "route": { "default_domain_resolver":"dns-direct", "override_android_vpn": true, "final":"PROXY" }
@@ -260,7 +268,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 ```jsonc
 "inbounds": [
   { "type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],
-    "mtu":8500,"stack":"system","auto_route":true,
+    "mtu":8500,"auto_route":true,
     "dns_mode":"hijack","dns_address":["<TUN_PEER_IP>"] }   // tun 网段 +1
 ]
 ```
@@ -275,7 +283,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 "log": { "level": "warn" },
 "inbounds": [
   { "type":"tun","tag":"tun-in","address":["172.19.0.1/30"],
-    "auto_route":true,"strict_route":true,"stack":"mixed","auto_redirect":true },
+    "auto_route":true,"strict_route":true,"auto_redirect":true },
   { "type":"direct","tag":"dns-in","listen":"127.0.0.1","listen_port":7853 }
 ],
 "dns": { "strategy": "ipv4_only" },
