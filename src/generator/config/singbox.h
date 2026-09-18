@@ -75,6 +75,24 @@ struct Profile
 const Profile &profileOf(Platform platform);
 
 /**
+ * Whether the platform's client can supply the data a `process_name` /
+ * `process_path` / `user` condition needs.
+ *
+ * The Apple clients only implement connection-owner lookup in the macOS
+ * standalone and jailbroken-iOS builds; the App Store/TestFlight builds throw
+ * "Not implemented". Android exposes package names, never a process path.
+ * Emitting such a condition anyway is not merely noisy: sing-box ANDs a process
+ * condition with every other condition of the same rule, so an unmatchable one
+ * silently disables the whole rule.
+ */
+bool platformSupportsProcessConditions(Platform platform);
+
+/**
+ * Whether the platform exposes `package_name` (Android only).
+ */
+bool platformSupportsPackageConditions(Platform platform);
+
+/**
  * Runtime settings forwarded from preferences / request arguments.
  */
 struct Settings

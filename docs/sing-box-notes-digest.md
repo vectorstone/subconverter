@@ -598,6 +598,15 @@ dnsmasq 侧：`uci set dhcp.@dnsmasq[0].noresolv=1` + `uci add_list dhcp.@dnsmas
 ```
 - **多个 `rule_set` 值之间是 OR**；但若引用的规则集内部只有一条"默认规则"且没有 `invert`，其字段会与外层规则**合并**（相当于把规则集里的条件平铺进来）；否则整体当作一个"其他字段"来 AND。
 - **1.14 修正了这个合并语义**（官方称非破坏性），所以"以前能用但没搞懂为什么能用"的配置在 1.14 上分流结果可能变化。
+- ⚠️ **生成器的合并陷阱（本项目实测，2026-09-18）**：`process_name` / `process_path` / `user` 等"进程类"字段进入 `r.items`，与域名族（`destinationAddressItems`：`domain` / `domain_suffix` / `domain_keyword` / `domain_regex`，含延迟解析的 `ip_cidr`）是**跨族 AND**（`route/rule/rule_default.go:185` vs `rule_abstract.go:126`，`match_state.go:19` 的 `groups.done()`）。
+  实测（1.14.1，`match[0]` debug 行）：
+  - `{"domain_keyword":["gstatic"]}` → **命中**（reject 生效）
+  - `{"process_name":["bogus"],"domain_keyword":["gstatic"]}` → **不命中**（HTTP 204，规则整体失效）
+  - `{"domain_suffix":["gstatic.com"],"domain_keyword":["NOTPRESENT"]}` → **命中**（同族内部是 OR）
+  - `{"domain_suffix":["gstatic.com"],"port":[12345]}` → **不命中**（跨族 AND）
+
+  因此**把一个 Surge 列表文件的所有行合并成一个规则对象，等价于把「行间 OR」变成「跨族 AND」**：只要文件里有一条该端无法满足的条件（iOS/Android 的 `PROCESS-NAME`；非 Android 的 `PACKAGE-NAME`），**整个文件的分流就静默失效**——不是噪音，是功能丢失。
+  本项目处理：`singbox::platformSupportsProcessConditions()` / `platformSupportsPackageConditions()` 按端过滤（Apple 官方客户端仅 macOS 独立版与越狱 iOS 支持进程类字段；Android 只给包名不给路径），`singBoxLineAllowed()` 在合并前丢弃无法满足的行，让其余条件恢复生效。
 
 ### 5.5 规则顺序语义 + 推荐骨架
 

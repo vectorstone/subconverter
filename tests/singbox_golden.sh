@@ -213,6 +213,36 @@ def check_platform(name):
             if entry.get("type") == "remote" and entry.get("http_client") != default_client:
                 failures.append(f"{name}: rule_set {entry.get('tag')!r} must pin http_client")
 
+    # sing-box ANDs a process condition with every other condition of the same
+    # rule (process/user items are hard-AND; domain and ip_cidr share one OR
+    # group). Since one list file becomes ONE rule object here, emitting a process
+    # condition the platform cannot satisfy silently disables the file's other
+    # conditions rather than merely adding noise. Verified: a rule with an
+    # unmatchable process_name plus a matching domain_keyword never fires.
+    #   - Apple clients: process_name/process_path/user only work in the macOS
+    #     standalone and jailbroken-iOS builds (App Store builds throw
+    #     "Not implemented"), so iOS must not receive them.
+    #   - Android: connection owner lookups yield package names, never a process
+    #     path, so process_name can never match there either.
+    # macOS/Windows/Linux (CLI) and OpenWrt keep them: those do resolve a path.
+    process_fields = {"process_name", "process_path", "process_path_regex", "user", "user_id"}
+    package_fields = {"package_name", "package_name_regex"}
+    supports_process = name in ("macos", "windows", "linux", "openwrt")
+    for rule in doc["route"]["rules"]:
+        present_process = process_fields & set(rule)
+        present_package = package_fields & set(rule)
+        if present_process and not supports_process:
+            failures.append(f"{name}: {sorted(present_process)} can never match on this platform "
+                            f"and would disable the whole rule")
+        if present_package and name != "android":
+            failures.append(f"{name}: {sorted(present_package)} is Android-only and would disable the whole rule")
+        # A rule mixing an unsatisfiable process condition with other conditions
+        # is the dangerous case; assert the family is never mixed on those platforms.
+        if not supports_process and present_process:
+            others = set(rule) - process_fields - package_fields - {"action", "outbound", "rule_set"}
+            if others:
+                failures.append(f"{name}: unsatisfiable process condition merged with {sorted(others)}")
+
     # skeleton mode: minimal groups, remapped rules, remote rule-set references
     expected_groups = {"proxy", "auto", "ChainProxyEntry", "ChainProxyExit"}
     if name in ("macos", "windows", "linux", "openwrt"):

@@ -604,7 +604,31 @@ static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &ar
     return rule_obj;
 }
 
-static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Value &rules, const std::string& rule, rapidjson::MemoryPoolAllocator<>& allocator, std::vector<singbox::RuleSetSpec> &rule_sets)
+/**
+ * Whether a ruleset line may be merged into the rule object built for the whole
+ * file on the given platform.
+ *
+ * sing-box ANDs a process condition with every other condition of the same rule
+ * (route/rule/rule_default.go places process/user items in the hard-AND set while
+ * domain and ip_cidr share one OR group). This generator merges a whole list file
+ * into a single rule object, so a Surge list's per-line OR becomes a cross-family
+ * AND. Emitting a process condition the client cannot satisfy therefore does not
+ * merely add log noise: it silently disables every other condition of that file
+ * (verified: {process_name:[bogus],domain_keyword:[gstatic]} never fires while
+ * {domain_keyword:[gstatic]} does). Dropping the unmatchable line keeps the rest
+ * of the file effective and removes a lookup that always fails.
+ */
+static bool singBoxLineAllowed(const std::string &realType, const singbox::Platform platform)
+{
+    if(realType == "process_name" || realType == "process_path" || realType == "process_path_regex"
+        || realType == "user" || realType == "user_id")
+        return singbox::platformSupportsProcessConditions(platform);
+    if(realType == "package_name" || realType == "package_name_regex")
+        return singbox::platformSupportsPackageConditions(platform);
+    return true;
+}
+
+static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Value &rules, const std::string& rule, rapidjson::MemoryPoolAllocator<>& allocator, std::vector<singbox::RuleSetSpec> &rule_sets, singbox::Platform platform)
 {
     using namespace rapidjson_ext;
     args.clear();
@@ -630,6 +654,11 @@ static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Va
     auto realType = toLower(raw_type);
     realType = replaceAllDistinct(realType, "-", "_");
     realType = replaceAllDistinct(realType, "ip_cidr6", "ip_cidr");
+
+    /// Skip conditions this platform can never satisfy; merging them in would
+    /// disable the other conditions of the same rule (see singBoxLineAllowed).
+    if(!singBoxLineAllowed(realType, platform))
+        return;
 
     rules | AppendToArray(realType.c_str(), rapidjson::Value(value.c_str(), allocator), allocator);
 }
@@ -724,7 +753,7 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
                 strLine.erase(strLine.find("//"));
                 strLine = trimWhitespace(strLine);
             }
-            appendSingBoxRule(temp, rule, strLine, allocator, rule_sets);
+            appendSingBoxRule(temp, rule, strLine, allocator, rule_sets, settings.platform);
         }
         if (rule.ObjectEmpty()) continue;
         applySingBoxTarget(rule, rule_group, allocator, settings);

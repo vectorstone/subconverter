@@ -268,6 +268,21 @@ std::string platformList()
     return "macos, windows, linux, android, ios, openwrt";
 }
 
+bool platformSupportsProcessConditions(Platform platform)
+{
+    // sing-box matches process_name / process_path against
+    // ConnectionOwner.ProcessPath, which only the macOS standalone build and
+    // jailbroken iOS can obtain; the official App Store/TestFlight clients
+    // throw "Not implemented" (ExtensionPlatformInterface.swift), and Android
+    // reports package names instead of a process path.
+    return platform == Platform::MacOS || platform == Platform::Windows || platform == Platform::Linux || platform == Platform::OpenWrt;
+}
+
+bool platformSupportsPackageConditions(Platform platform)
+{
+    return platform == Platform::Android;
+}
+
 const Profile &profileOf(Platform platform)
 {
     // No platform emits tun `stack`: the value is deprecated in sing-box 1.15.0
