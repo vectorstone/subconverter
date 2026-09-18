@@ -165,7 +165,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 | 维度 | macOS | Windows | Linux 桌面 | Android | iOS | OpenWrt |
 |---|---|---|---|---|---|---|
 | `inbounds` | tun + mixed(127.0.0.1:2080) | tun + mixed | tun + mixed | **仅 tun** | **仅 tun** | tun（+ 可选 dns-in） |
-| `route.auto_detect_interface` | ✅ | ✅ | ✅ | ❌ 不支持 | ❌ 不支持 | ✅（必开） |
+| `route.auto_detect_interface` | ✅ | ✅ | ✅ | ✅（**必开**：唯一的 `VpnService.protect()` 入口，见 digest §2.2.1） | ❌ 不支持 | ✅（必开） |
 | `strict_route` | ✅ | ✅ | ✅ | ❌ 未实现 | ❌ 未实现 | ✅ |
 | `auto_redirect` | ❌ 写了直接 check 失败 | ❌ | 仅可选（root+nft） | ❌ | ❌ | ✅（默认开） |
 | `dns_mode`/`dns_address`（tun 级） | 可选 | 可选 | 可选 | ✅ hijack + tun 对端地址（`172.19.0.1/30` 的对端） | ✅ 同 Android | **不写**（dnsmasq 接管；劫持规则限定 `inbound:["dns-in"]`） |
@@ -260,9 +260,11 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
     "mtu":8500,"auto_route":true,
     "dns_mode":"hijack","dns_address":["<TUN_PEER_IP>"] }   // tun 网段 +1
 ],
-"route": { "default_domain_resolver":"dns-direct", "override_android_vpn": true, "final":"PROXY" }
+"route": { "default_domain_resolver":"dns-direct", "auto_detect_interface": true, "override_android_vpn": true, "final":"PROXY" }
 ```
-（**无 `auto_detect_interface`、无 `strict_route`、无进程/包规则、无 `route_address_set`、无 `experimental`**。）
+（**无 `strict_route`、无进程/包规则、无 `route_address_set`、无 `experimental`**。）
+
+> `auto_detect_interface: true` **必须保留**（2026-09 修正）：Android 在 sing-box 里 `constant.IsLinux == true`，故字段合法；它是 `NetworkManager.ProtectFunc()` → `VpnService.protect()` 的唯一入口。删掉后所有出站 socket 被重新导入 TUN，表现为「启动成功但完全不能上网」。详见 digest §2.2.1。
 
 **iOS**
 ```jsonc
@@ -527,6 +529,23 @@ src/generator/config/singbox/
 >   5. 回滚路径：上一镜像 `subconverter-local:usage-11d3ffa02596` 仍在目标机，备份目录内保留改前的 override 与 `.env`，`docker compose up -d` 即可回退。
 > - **变更前后对比（prod）**：变更前 `/sub?target=singbox` 输出在 1.14 上 `FATAL ... legacy DNS fakeip options ... removed in sing-box 1.14.0`；变更后同请求输出通过 `check`。
 > - 未执行项（需显式确认）：在网关上按 §4.5 路径 B 实机替换 `/opt/open-box/etc/config.json` —— 会短暂中断 LAN，目前只做了 `check` 验证。
+
+> **M8：Android 实机问题修复（2026-09-18）**
+>
+> 触发：Android 用 `singbox_platform=android` 短链导入 SFA 后，启动有 WARN 且**完全不能上网**；用户日志 `logs_20260918_113542.txt`（1 秒 1121 行）。
+>
+> **缺陷 1 — 隐式默认 HTTP 客户端 WARN**：`WARN implicit default HTTP client ... deprecated in sing-box 1.14.0 and will be removed in sing-box 1.16.0`。
+> - 源码定位：`experimental/deprecated/constants.go:153` `OptionImplicitDefaultHTTPClient`，唯一 `Report` 点是 `box.go:414` 的 fallback 闭包；只要 `route.default_http_client` / `http_clients[0]` 生效就不会执行。
+> - 修复：骨架在**远程**规则集模式下输出 `http_clients:[{tag:"hc-default", detour:<traffic selector>}]` + `route.default_http_client`，每个 `rule_set[]` 条目再显式 `http_client`。
+> - detour 语义保持：旧隐式客户端是 `DefaultOutbound: true` → `outboundManager.Default()` → **`route.final`（代理组）**，不是直连；写成直连会改变行为，且大陆直连 `raw.githubusercontent.com` 会让首次远程规则集下载 `FATAL` 启动失败。
+>
+> **缺陷 2 — Android 全量自环（核心）**：`auto_detect_interface` 被 Android profile 关掉，导致没有任何代码调用 `VpnService.protect()`。
+> - 源码链路：`constant/os.go:23`（`IsLinux` 含 Android）→ `route/network.go:73` 守卫放行 → `common/dialer/default.go:123` 只在 `AutoDetectInterface()` 为真时走 `ProtectFunc()` → `route/network.go:396` → SFA `VPNService.kt:51 protect(fd)`。
+> - 日志指纹：`inbound DNS packet from <TUN_PEER_IP>:...`（源为 TUN 网段 `172.19.0.1/30` 的对端）旁紧邻 `found package name: io.nekohasekai.sfa`（336 次）= DNS 包源就是 App 自己的 socket；同一源端口复用 203 次、全程仅 10 条出站日志。Apple 端相反（`ExtensionPlatformInterface.swift:225` 返回 false），故 iOS profile 保持不写。
+> - 修复：`android_profile.route_auto_detect_interface = true`。
+>
+> **验证**：`tests/singbox_golden.sh` 新增两条断言（远程规则集必须显式 http client；android/desktop/openwrt 必须开 `auto_detect_interface`）并全绿；用真实 207 节点订阅（短链反解）生成 android 配置 → 207/207 节点、`sing-box check` 通过；本机 `run` 复现——修复前 WARN 计数 1，修复后 0，且规则集下载走 `outbound/vless[vless-reality]`（代理组），出口连通 `HTTP 204`。
+> - 文档纠错：`docs/sing-box-notes-digest.md`（§2.1 表、§2.2.1 新增、§2.3 表、§2.4 Android 增量、§5 远程规则集）与 `docs/sing-box-conversion-plan.md`（§4.2 表、Android 片段）此前把 Android 记为「无 `auto_detect_interface`」，是该缺陷的根因，已一并更正。
 
 
 

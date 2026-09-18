@@ -97,13 +97,37 @@
 | `route.rules` / `route.rule_set` / `route.final` | ✅ 共享 | 含 `process_name` / `package_name` / `wifi_*` 等平台专属字段时要删 |
 | `experimental` | ⚠️ 语义共享，**值要改** | `cache_file.path` 绝对路径必失效；移动端 `clash_api` 通常由 App 自管 |
 | `inbounds` | ❌ **必须逐端重写** | 没有任何一个入站类型在四端都合法/可用 |
-| `route.auto_detect_interface` | ❌ 桌面/路由器要，移动端无此概念 | — |
+| `route.auto_detect_interface` | ✅ 必须为 true | Apple 端必须为 false | ✅ **Android 必须为 true**（见 2.1.1） | ✅ 必须为 true |
 
 ### 2.2 差异的三个根因
 
 1. **进程有没有特权写内核网络栈**：Linux 路由器 root / `CAP_NET_ADMIN`；macOS CLI 需 root 才能建 `utun`；iOS/Android **完全无特权**，TUN 由 NetworkExtension / VpnService 提供。
 2. **系统有没有可被接管的本地 DNS 解析器**：路由器有 dnsmasq/odhcpd；macOS 有 mDNSResponder（会代理缓存 DNS，故 `reverse_mapping` 不可靠）；iOS/Android DNS 由 VPN 配置下发。
 3. **OS 是否提供官方 TUN 通道**：Linux/Windows/macOS 由 sing-box 自建（sing-tun）；iOS/Android 必须走 NE / VpnService，**字段可用性是框架能力的子集**。
+
+### 2.2.1 Android 的 `auto_detect_interface` 是硬要求（2026-09 实测结论）
+
+**结论：Android 必须写 `route.auto_detect_interface: true`；Apple 端（iOS/SFM/SFI）必须不写。**
+
+早先本仓库的笔记误记为「Android 无此字段」，据此生成的 Android 骨架**不带该字段**，实测表现为「sing-box 启动成功但完全不能上网」。源码链路（`sing-box v1.14.1`）如下：
+
+1. `constant.IsLinux = goos.IsLinux == 1 || goos.IsAndroid == 1`（`constant/os.go:23`）——Android 在 sing-box 里**算 Linux**，所以 `route.auto_detect_interface` 的守卫 `!(C.IsLinux || C.IsDarwin || C.IsWindows)`（`route/network.go:73`）**在 Android 上放行**；写了不会 `check` 失败。
+2. 只有 `networkManager.AutoDetectInterface() == true` 时，`common/dialer/default.go` 才会走到 `networkManager.ProtectFunc()`（`default.go:123`）。
+3. `ProtectFunc()` 在平台接口 `UsePlatformAutoDetectInterfaceControl()` 为 true 时，对每个新建 socket 调用 `platformInterface.AutoDetectInterfaceControl(fd)`（`route/network.go:396-403`）。
+4. SFA 的实现就是 `override fun autoDetectInterfaceControl(fd: Int) { protect(fd) }`（`VpnService.kt:51`），也就是 Android `VpnService.protect()`——**把该 socket 排除在 VPN 路由之外**。
+5. 反之，不写该字段时 `BindInterface`/`RoutingMark` 也都为空、`autoDetectBindFunc` 为 nil，**没有任何代码调用 `protect()`**：所有出站 TCP/UDP socket（含 `dns-direct` 的 53/UDP 与 `dns-proxy` 的 443）都被重新导入 TUN，形成自环。
+
+**Apple 端为什么相反**：`ExtensionPlatformInterface.swift:225` 的 `usePlatformAutoDetectControl()` 返回 **false**，`autoDetectControl()` 是空实现；NE 由系统托管隧道与路由，不需要也无法用 `protect()`。且 Apple 端若设 `auto_detect_interface` 会走 `AutoDetectInterfaceFunc()` 分支去 bind 物理网卡，反而破坏 NE 语义。
+
+**故障日志指纹**（`logs_*.txt`，1 秒内 1121 行）：
+
+| 现象 | 证据 |
+|---|---|
+| DNS 包不断回到 TUN | `inbound/tun[tun-in]: inbound DNS packet from <TUN_PEER_IP>:<PORT>` 反复出现（本机 TUN 网段 `172.19.0.1/30`，源地址即隧道对端） |
+| 源就是 App 自己的 socket | 紧邻的 `router: found package name: io.nekohasekai.sfa`（336 次）——只有「自己发给自己的包」才会被解析回自己的包名 |
+| 自环而非正常查询 | 同一源端口 `:46186` 复用 203 次、几秒内上千行，且几乎**没有出站连接日志**（全程仅 10 条 `outbound connection`，且都是 urltest 探活） |
+
+对照：同样的配置在 macOS 上（带 `auto_detect_interface`）能正常解析并出站（`outbound/vless[...]: outbound connection to raw.githubusercontent.com:443` → `sing-box started`）。
 
 ### 2.3 逐平台对比表
 
@@ -112,7 +136,7 @@
 | 运行形态 | CLI（brew）**需 root**；或官方 GUI | 官方 App（NetworkExtension） | 官方 App（VpnService） | procd 服务；官方包默认跑 `sing-box` 用户，**TUN 需 root** |
 | 推荐入站 | `tun`；调试用 `mixed` | **只能 `tun`**（App 实现） | **只能 `tun`** | `tun` + `auto_redirect`（首选）；或 `redirect`+`tproxy`+`dns-in` |
 | `auto_redirect` | ❌ 无效（无 nftables），**写了 `check` 失败** | ❌ | ⚠️ 仅 root 设备可用 | ✅ **官方推荐**，自动向 fw4 插规则 |
-| `auto_detect_interface` | ✅ 必开 | ❌ 无此字段 | ❌ 无此字段 | ✅ **必开**（不开直接断网） |
+| `auto_detect_interface` | ✅ 必开 | ❌ 必须不写 | ✅ **必开**（否则无 `protect()`，全量自环断网） | ✅ **必开**（不开直接断网） |
 | `strict_route` | 无实际语义 | ❌ 未实现 | ❌ 未实现 | ✅ Linux 上有明确语义（ICMP 行为、SO_BINDTODEVICE） |
 | 进程/用户规则 | ✅ `process_name`/`process_path`/`user` | ❌ 不支持（越狱版才支持） | ❌ 用 `package_name` | ✅ 全支持，还有 `include_uid`/`source_mac_address` |
 | 路径类字段 | 任意路径 | App 容器内 / Profile 方式 | App 容器内 / Profile 方式 | `/etc/sing-box` 等固定位置 |
@@ -170,7 +194,10 @@
     "auto_route": true,
     "dns_mode": "hijack", "dns_address": ["<TUN_PEER_IP>", "<TUN_PEER_IP6>"] }
 ],
-"route": { "override_android_vpn": true }   // 让 TUN 把 Android VPN 当上游
+"route": {
+  "auto_detect_interface": true,   // ★ 必写：唯一的 VpnService.protect() 入口（见 2.2.1）
+  "override_android_vpn": true     // 让 TUN 把 Android VPN 当上游
+}
 // ⚠ 删掉：interface_name、gso（历史字段）、include_uid、include_interface、
 //          route_address_set / route_exclude_address_set（VpnService 会崩）
 // per-app 交给 App 界面选，不要写死在 JSON 里
@@ -616,7 +643,13 @@ dnsmasq 侧：`uci set dhcp.@dnsmasq[0].noresolv=1` + `uci add_list dhcp.@dnsmas
 - **`sing-box check` 会真的打开本地 `.srs` 文件**：路径不存在直接 `FATAL: open .../geosite-cn.srs: no such file or directory`。所以生成/部署顺序固定为：**先补文件，再 check**。
 - **`remote` 规则集只有在 `experimental.cache_file.enabled: true` 时才会被缓存**，否则每次启动重新下载。
 - 1.14 起 `download_detour` **已弃用**（计划 1.16 移除）→ 改 `http_client`；同时新增 `initial_path`（首次启动先用本地文件，不阻塞启动）。
-- 1.14 起"隐式默认 HTTP 客户端"已弃用 → 显式配 `http_clients` + `route.default_http_client`，否则每次启动有 WARN。
+- 1.14 起"隐式默认 HTTP 客户端"已弃用 → 显式配 `http_clients` + `route.default_http_client`，否则每次启动有 WARN：
+  `WARN implicit default HTTP client using default outbound for remote rule-sets is deprecated in sing-box 1.14.0 and will be removed in sing-box 1.16.0.`
+  （源码：`experimental/deprecated/constants.go` 的 `OptionImplicitDefaultHTTPClient`，只在 `box.go:414` 那个 fallback 闭包里 `Report`；一旦 `route.default_http_client` 或 `http_clients[0]` 生效，`Manager.Start` 先解析出 `m.defaultTransport`，该闭包不会被执行，WARN 消失。1.16 移除后这条 fallback 路径会消失，届时**必须**显式配置。）
+- **隐式客户端走 `route.final`，不是直连**：旧的 fallback 构造 `HTTPClientOptions{DefaultOutbound: true}`（`box.go:415-416`），最终落到 `NewDefaultOutboundDetour` → `outboundManager.Default()`；而 `Default()` 由 `outbound.NewManager(..., routeOptions.Final)` 选定（`box.go:214`），也就是**当前的 `route.final`（代理组）**。
+  因此显式化时若把 detour 写成直连，等于**改变了行为**：大陆直连 `raw.githubusercontent.com` 通常失败，而远程规则集首次下载失败是
+  `FATAL start service: initialize rule-set[N]: initial rule-set: ...`（**启动即失败**，不是降级）。本仓库生成器因此让该客户端保持 `detour: <traffic selector group>`，与 DNS `dns-proxy` 的 detour 语义一致。
+- 另外：`http_clients[].detour` 不能写成空 `direct` outbound（`detour to an empty direct outbound makes no sense`，实测 FATAL）；要么省略 detour，要么指向代理组。
 
 **编译自己的规则集**
 ```bash

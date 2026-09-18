@@ -98,6 +98,8 @@ struct Settings
     std::string geosite_url_prefix = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/";
     std::string geoip_url_prefix = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/";
     std::string cache_path;
+    /// Tag of the explicit default HTTP client used for remote rule-set downloads.
+    std::string http_client_tag = "hc-default";
 };
 
 struct RuleSetSpec

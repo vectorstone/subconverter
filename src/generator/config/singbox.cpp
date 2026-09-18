@@ -100,6 +100,18 @@ bool isPlainDirect(const Value &outbound, const std::string &tag)
     return outbound.MemberCount() <= 2;
 }
 
+/**
+ * Whether the emitted configuration downloads no rule set at all, i.e. every
+ * rule-set reference resolves to a local `.srs` file. Both the skeleton (which
+ * decides whether to declare an HTTP client) and applyRuleSets (which writes the
+ * `remote` entries) must agree, so the decision lives in one place.
+ */
+bool usesLocalRuleSets(const Settings &settings)
+{
+    const Profile &profile = profileOf(settings.platform);
+    return settings.ruleset_source < 0 ? profile.local_rulesets : settings.ruleset_source > 0;
+}
+
 void ensureProxyReference(Document &doc, const Settings &settings, std::vector<std::string> &warnings)
 {
     if(!doc.HasMember("route") || !doc["route"].IsObject())
@@ -149,6 +161,23 @@ void ensureProxyReference(Document &doc, const Settings &settings, std::vector<s
                 continue;
             }
             server | AddMemberOrReplace("detour", makeString(final_tag, allocator), allocator);
+        }
+    }
+
+    // Keep the rule-set download client on the traffic selector too, mirroring
+    // the DNS detour above: the implicit client this replaces dialled through
+    // route.final, and a direct dial cannot reach the rule-set hosts from
+    // mainland China, where a failed initial download is a fatal startup error.
+    if(doc.HasMember("http_clients") && doc["http_clients"].IsArray())
+    {
+        for(Value &client : doc["http_clients"].GetArray())
+        {
+            if(!client.HasMember("detour"))
+                continue;
+            if(final_tag == settings.direct_tag)
+                client.RemoveMember("detour");
+            else
+                client | AddMemberOrReplace("detour", makeString(final_tag, allocator), allocator);
         }
     }
 }
@@ -257,8 +286,17 @@ const Profile &profileOf(Platform platform)
         true, true, 9000, true, true, false, false, false, false,
         true, true, true, "", false, "warn", true, "prefer_ipv4"
     };
+    // android: route_auto_detect_interface must stay true. `constant.IsLinux`
+    // covers Android, so the kernel accepts the field, and it is the only path
+    // that reaches NetworkManager.ProtectFunc() ->
+    // PlatformInterface.AutoDetectInterfaceControl() -> VpnService.protect().
+    // Without it every outbound socket (including the dns-direct/dns-proxy DNS
+    // transports) is routed back into the tun: the tunnel starts, then the
+    // device forwards DNS to itself in a loop and has no usable traffic.
+    // iOS is the opposite: ExtensionPlatformInterface.usePlatformAutoDetectControl()
+    // returns false, so the field would merely bind physical NICs.
     static const Profile android_profile = {
-        false, true, 8500, false, false, false, true, false, true,
+        false, true, 8500, true, false, false, true, false, true,
         false, false, false, "", false, "warn", true, "prefer_ipv4"
     };
     static const Profile ios_profile = {
@@ -417,6 +455,24 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
         doc.AddMember("outbounds", outbounds, allocator);
     }
 
+    /// Remote rule sets must name their HTTP client: relying on the implicit
+    /// default (which dials through the default outbound) is deprecated in
+    /// 1.14.0 and removed in 1.16.0. The explicit client keeps the same egress
+    /// the implicit one used — the traffic selector group — instead of falling
+    /// back to a direct dial: the bundled rule-set hosts are unreachable
+    /// directly from mainland China, and a failed initial remote rule-set
+    /// download is a fatal startup error.
+    if(!usesLocalRuleSets(settings) && !settings.http_client_tag.empty())
+    {
+        Value clients(kArrayType);
+        Value client(kObjectType);
+        client.AddMember("tag", makeString(settings.http_client_tag, allocator), allocator);
+        if(!settings.proxy_tag.empty())
+            client.AddMember("detour", makeString(settings.proxy_tag, allocator), allocator);
+        clients.PushBack(client, allocator);
+        doc.AddMember("http_clients", clients, allocator);
+    }
+
     {
         Value rules(kArrayType);
         {
@@ -473,6 +529,8 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
         if(profile.override_android_vpn)
             route.AddMember("override_android_vpn", true, allocator);
         route.AddMember("default_domain_resolver", makeString("dns-direct", allocator), allocator);
+        if(!usesLocalRuleSets(settings) && !settings.http_client_tag.empty())
+            route.AddMember("default_http_client", makeString(settings.http_client_tag, allocator), allocator);
         route.AddMember("rule_set", Value(kArrayType), allocator);
         route.AddMember("rules", rules, allocator);
         route.AddMember("final", makeString(settings.proxy_tag, allocator), allocator);
@@ -509,8 +567,7 @@ void applyRuleSets(Document &doc, const std::vector<RuleSetSpec> &rule_sets, con
     if(rule_sets.empty() || !doc.HasMember("route") || !doc["route"].IsObject())
         return;
     auto &allocator = doc.GetAllocator();
-    const Profile &profile = profileOf(settings.platform);
-    const bool local_rulesets = settings.ruleset_source < 0 ? profile.local_rulesets : settings.ruleset_source > 0;
+    const bool local_rulesets = usesLocalRuleSets(settings);
     Value array(kArrayType);
     std::set<std::string> seen;
     for(const RuleSetSpec &spec : rule_sets)
@@ -531,6 +588,8 @@ void applyRuleSets(Document &doc, const std::vector<RuleSetSpec> &rule_sets, con
             const std::string prefix = spec.geoip ? settings.geoip_url_prefix : settings.geosite_url_prefix;
             entry.AddMember("url", makeString(prefix + spec.tag + ".srs", allocator), allocator);
             entry.AddMember("update_interval", makeString("1d", allocator), allocator);
+            if(!settings.http_client_tag.empty())
+                entry.AddMember("http_client", makeString(settings.http_client_tag, allocator), allocator);
         }
         array.PushBack(entry, allocator);
     }

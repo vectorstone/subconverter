@@ -185,8 +185,33 @@ def check_platform(name):
         failures.append("android: override_android_vpn expected")
     if name == "ios" and doc["route"].get("override_android_vpn"):
         failures.append("ios: override_android_vpn must not be set")
+    # Android *requires* auto_detect_interface: it is the only path that reaches
+    # platformInterface.AutoDetectInterfaceControl -> VpnService.protect(), and
+    # without it every proxy socket is routed back into the tun, so the device
+    # gets a working tunnel and no usable traffic. `constant.IsLinux` covers
+    # Android, so the kernel accepts the field. Desktop/OpenWrt already emit it
+    # to avoid tun route loops.
+    if name in ("android", "macos", "windows", "linux", "openwrt"):
+        if not doc["route"].get("auto_detect_interface"):
+            failures.append(f"{name}: route.auto_detect_interface must be enabled")
     if name in ("macos", "windows", "linux") and "auto_redirect" in text:
         failures.append(f"{name}: auto_redirect is Linux-only")
+
+    # Remote rule sets must name an HTTP client explicitly: sing-box 1.14.0
+    # deprecated the implicit default (removed in 1.16.0) and it dialled through
+    # the default outbound, i.e. whatever route.final currently selects.
+    if rule_types == {"remote"}:
+        clients = [c.get("tag") for c in doc.get("http_clients", [])]
+        default_client = doc["route"].get("default_http_client")
+        if not clients:
+            failures.append(f"{name}: remote rule_set without http_clients")
+        if not default_client:
+            failures.append(f"{name}: remote rule_set without route.default_http_client")
+        elif default_client not in clients:
+            failures.append(f"{name}: default_http_client {default_client!r} is not declared in http_clients")
+        for entry in doc["route"].get("rule_set", []):
+            if entry.get("type") == "remote" and entry.get("http_client") != default_client:
+                failures.append(f"{name}: rule_set {entry.get('tag')!r} must pin http_client")
 
     # skeleton mode: minimal groups, remapped rules, remote rule-set references
     expected_groups = {"proxy", "auto", "ChainProxyEntry", "ChainProxyExit"}
