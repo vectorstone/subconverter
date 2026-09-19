@@ -147,6 +147,40 @@ ssh <GATEWAY> 'cp /opt/open-box/etc/config.json.bak.<STAMP> /opt/open-box/etc/co
 3. 部署后立即跑第 4 节的 1、3 两项；观察 `/s/*` 命中率与错误日志。
 4. 回滚：`SUBCONVERTER_IMAGE=<上一 tag>` 后 `docker compose up -d`；必要时从备份恢复数据卷。
 
+### 6.1 新增 `SHORTLINK_*` 变量的正确姿势（2026-09-19 踩坑记录）
+
+prod 的 compose 用 **显式 `environment:` + `${VAR}` 插值**，没有 `env_file:`。因此
+**只在 `.env` 里加变量不会进入容器**，必须同时在 compose 的 `environment:` 里加一行透传：
+
+```yaml
+environment:
+    SHORTLINK_SINGBOX_DEFAULT: ${SHORTLINK_SINGBOX_DEFAULT:-}
+```
+
+本仓库的 `docker-compose.shortlink.yml` 是权威副本，部署机上的 `docker-compose.yml` 应由它同步；
+`docker-compose.override.yml`（部署机私有）里的 `image:` 会**覆盖** `${SUBCONVERTER_IMAGE}`，
+所以**换镜像要改 override 里的 digest**，改 `.env` 是无效的。重建务必带 `--no-deps`，
+否则会连带重启 `subconverter-postgres`：
+
+```bash
+sudo docker compose --env-file .env -p subconverter up -d --no-deps subconverter
+sudo docker exec subconverter sh -c 'env | grep ^SHORTLINK_'   # 确认变量真的进了容器
+```
+
+### 6.2 刷新既有短链
+
+快照是生成时固化的，改了生成器或 env 之后，既有短链必须刷新才会更新：
+
+```bash
+# 门户 UI 逐条「刷新配置」，或走 API（POST，无 body）
+curl -X POST --data-binary "" -H "Authorization: Bearer $API_TOKEN" \
+     "$API/api/short-links/<id>/refresh"
+```
+
+注意 `/api` 的身份语义：`API_TOKEN`（= 进程的 `global.accessToken`）在数据层不是「全权管理员」，
+按 id 查库时只匹配自己名下的记录；**跨账号刷新要用 `SHORTLINK_ADMIN_SUBJECTS` 里的身份**，
+即经反向代理带上 `Cf-Access-Authenticated-User-Email` 调用门户（需 `SHORTLINK_TRUST_ACCESS_HEADER=true`）。
+
 ---
 
 ## 7. 脱敏要求
