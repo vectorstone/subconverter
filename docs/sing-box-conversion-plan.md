@@ -176,7 +176,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 | `experimental.cache_file` | ✅ 相对路径 | ✅ | ✅ | 不输出 | 不输出 | ✅ `/opt/open-box/data/cache.db` |
 | `rule_set` | remote `.srs` + `update_interval` | remote | remote | remote | remote | **local `.srs` 绝对路径** |
 | `log` | `{level:"warn",timestamp:true}` | 同 | 同 | `{level:"warn"}` | 同 | **`{level:"warn"}`，无 output（走 syslog）** |
-| `mtu` | 9000 | 9000 | 9000 | 8500 | 8500 | 9000 |
+| `mtu` | 1500 | 1500 | 1500 | 1500 | 1500 | 1500 |
 | `stack` | 不输出（原 `mixed`） | 同 | 同 | 同 | 同 | 同 |
 
 > ~~`stack` 在 1.14 完全可用（1.15 起才废弃、计划 1.17 移除），因此现在照常输出。~~
@@ -243,7 +243,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 ```jsonc
 "inbounds": [
   { "type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],
-    "mtu":9000,"auto_route":true,"strict_route":true },
+    "mtu":1500,"auto_route":true,"strict_route":true },
   { "type":"mixed","tag":"mixed-in","listen":"127.0.0.1","listen_port":2080 }
 ]
 ```
@@ -257,7 +257,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 ```jsonc
 "inbounds": [
   { "type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],
-    "mtu":8500,"auto_route":true,
+    "mtu":1500,"auto_route":true,
     "dns_mode":"hijack","dns_address":["<TUN_PEER_IP>"] }   // tun 网段 +1
 ],
 "route": { "default_domain_resolver":"dns-direct", "auto_detect_interface": true, "override_android_vpn": true, "final":"PROXY" }
@@ -270,7 +270,7 @@ FATAL decode config at /tmp/sc-legacy.json: dns: legacy DNS fakeip options are
 ```jsonc
 "inbounds": [
   { "type":"tun","tag":"tun-in","address":["172.19.0.1/30","fdfe:dcba:9876::1/126"],
-    "mtu":8500,"auto_route":true,
+    "mtu":1500,"auto_route":true,
     "dns_mode":"hijack","dns_address":["<TUN_PEER_IP>"] }   // tun 网段 +1
 ]
 ```
@@ -360,10 +360,10 @@ OpenWrt 专属硬约束（来自网关现网实测 + Open-Box 引擎源码）：
 
 | 组 | 成员 | 说明 |
 |---|---|---|
-| `proxy`（`route.final`） | `auto` + **落地节点** + 普通节点 | 在客户端 `proxy` 组里直接选落地即可出链；`auto` 保持首位即默认值 |
-| `auto` / `ChainProxyEntry` | 仅普通节点 | 落地一旦进入，`落地.detour → ChainProxyEntry` 即构环，故必须排除 |
+| `proxy`（`route.final`） | `auto` + **落地节点** + 普通节点 | 在客户端 `proxy` 组里直接选落地即可出链；`auto` 保持首位（未显式指定 `default` 时的隐式默认），需要固定落地时用 `singbox_default` 输出显式 `default` |
+| `auto` / `ChainProxyEntry` | 仅普通节点（`auto` 可用 `singbox_auto_include` 按备注关键词进一步收窄） | 落地一旦进入，`落地.detour → ChainProxyEntry` 即构环，故必须排除；`auto` 是唯一做健康检查的组，收窄它是消掉启动探测风暴的唯一手段 |
 | `ChainProxyExit` | `DIRECT` + 落地 | **首位 `DIRECT` 即默认值**：不手动选就是直连，客户端不会报错 |
-| `GLOBAL` | `DIRECT` + `proxy` + `auto` + 全部节点 | 仅 clash_mode Global 使用 |
+| `GLOBAL` | `DIRECT` + `proxy` + `auto` + 全部节点 | 仅 clash_mode Global 使用；显式 `default: proxy`（否则隐式落到首位 `DIRECT`，「Global 模式」会变成全部直连） |
 
 修正原因：修正前骨架把落地从 `proxy` 里也排除了，而 `route.final` 正是 `proxy`，于是"在客户端选落地"这条 Clash 里成立的链式操作在 sing-box 产物上**永远无法生效**（实测：`final=proxy` 时无论 `ChainProxyExit` 选什么都只有一跳）。`proxy ∋ 落地` 本身不成环，因为 `落地.detour` 指向的 `ChainProxyEntry` 不含落地；反之 `x-sc-underlying-proxy=proxy` 这类"落地指向含自己的组"仍由 `cycle` 检出并丢弃。
 
