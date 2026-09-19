@@ -605,30 +605,35 @@ static rapidjson::Value transformRuleToSingBox(std::vector<std::string_view> &ar
 }
 
 /**
- * Whether a ruleset line may be merged into the rule object built for the whole
- * file on the given platform.
+ * Condition families sing-box places in the rule's hard-AND set. Domain and
+ * ip_cidr items share one OR group, but a process/user item is ANDed with every
+ * other condition of the same rule (route/rule/rule_default.go), so these must
+ * never share a rule object with the other families.
+ */
+static bool isSingBoxProcessCondition(const std::string &real_type)
+{
+    return real_type == "process_name" || real_type == "process_path" || real_type == "process_path_regex"
+        || real_type == "user" || real_type == "user_id";
+}
+
+/**
+ * Whether a ruleset line may be emitted at all on the given platform.
  *
- * sing-box ANDs a process condition with every other condition of the same rule
- * (route/rule/rule_default.go places process/user items in the hard-AND set while
- * domain and ip_cidr share one OR group). This generator merges a whole list file
- * into a single rule object, so a Surge list's per-line OR becomes a cross-family
- * AND. Emitting a process condition the client cannot satisfy therefore does not
- * merely add log noise: it silently disables every other condition of that file
- * (verified: {process_name:[bogus],domain_keyword:[gstatic]} never fires while
- * {domain_keyword:[gstatic]} does). Dropping the unmatchable line keeps the rest
- * of the file effective and removes a lookup that always fails.
+ * Emitting a process condition the client cannot satisfy does not merely add log
+ * noise (verified: {process_name:[bogus],domain_keyword:[gstatic]} never fires
+ * while {domain_keyword:[gstatic]} does). Dropping the line on a platform whose
+ * client can never resolve a connection owner removes a lookup that always fails.
  */
 static bool singBoxLineAllowed(const std::string &realType, const singbox::Platform platform)
 {
-    if(realType == "process_name" || realType == "process_path" || realType == "process_path_regex"
-        || realType == "user" || realType == "user_id")
+    if(isSingBoxProcessCondition(realType))
         return singbox::platformSupportsProcessConditions(platform);
     if(realType == "package_name" || realType == "package_name_regex")
         return singbox::platformSupportsPackageConditions(platform);
     return true;
 }
 
-static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Value &rules, const std::string& rule, rapidjson::MemoryPoolAllocator<>& allocator, std::vector<singbox::RuleSetSpec> &rule_sets, singbox::Platform platform)
+static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Value &rules, rapidjson::Value &process_rules, const std::string& rule, rapidjson::MemoryPoolAllocator<>& allocator, std::vector<singbox::RuleSetSpec> &rule_sets, singbox::Platform platform)
 {
     using namespace rapidjson_ext;
     args.clear();
@@ -655,12 +660,16 @@ static void appendSingBoxRule(std::vector<std::string_view> &args, rapidjson::Va
     realType = replaceAllDistinct(realType, "-", "_");
     realType = replaceAllDistinct(realType, "ip_cidr6", "ip_cidr");
 
-    /// Skip conditions this platform can never satisfy; merging them in would
-    /// disable the other conditions of the same rule (see singBoxLineAllowed).
+    /// Skip conditions this platform can never satisfy (see singBoxLineAllowed).
     if(!singBoxLineAllowed(realType, platform))
         return;
 
-    rules | AppendToArray(realType.c_str(), rapidjson::Value(value.c_str(), allocator), allocator);
+    /// Process conditions go to their own accumulator: they are hard-ANDed, and
+    /// a whole list file is merged into one rule object below, so leaving them
+    /// here would let one unresolvable process lookup disable the file's domain,
+    /// rule_set and ip conditions as well.
+    rapidjson::Value &target = isSingBoxProcessCondition(realType) ? process_rules : rules;
+    target | AppendToArray(realType.c_str(), rapidjson::Value(value.c_str(), allocator), allocator);
 }
 
 void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, const singbox::Settings &settings, std::vector<singbox::RuleSetSpec> &rule_sets)
@@ -739,6 +748,7 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
 
         std::string::size_type lineSize;
         rapidjson::Value rule(rapidjson::kObjectType);
+        rapidjson::Value process_rule(rapidjson::kObjectType);
 
         while(getline(strStrm, strLine, delimiter))
         {
@@ -753,11 +763,25 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
                 strLine.erase(strLine.find("//"));
                 strLine = trimWhitespace(strLine);
             }
-            appendSingBoxRule(temp, rule, strLine, allocator, rule_sets, settings.platform);
+            appendSingBoxRule(temp, rule, process_rule, strLine, allocator, rule_sets, settings.platform);
         }
-        if (rule.ObjectEmpty()) continue;
-        applySingBoxTarget(rule, rule_group, allocator, settings);
-        rules.PushBack(rule, allocator);
+        if (!rule.ObjectEmpty())
+        {
+            applySingBoxTarget(rule, rule_group, allocator, settings);
+            rules.PushBack(rule, allocator);
+        }
+        /// The file's process conditions follow as their own rule, targeting the
+        /// same group: a client that cannot resolve a connection owner (the
+        /// sandboxed Apple clients throw "Not implemented") then only fails to
+        /// match this rule instead of taking the domain and rule_set conditions
+        /// above down with it. Same target, so the order between the two cannot
+        /// change a decision, and keeping the file's main rule first leaves the
+        /// match[N] indices in the client log where they were.
+        if (!process_rule.ObjectEmpty())
+        {
+            applySingBoxTarget(process_rule, rule_group, allocator, settings);
+            rules.PushBack(process_rule, allocator);
+        }
     }
 
     if (!base_rule.HasMember("route"))

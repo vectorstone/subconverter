@@ -93,6 +93,13 @@ bool platformSupportsProcessConditions(Platform platform);
 bool platformSupportsPackageConditions(Platform platform);
 
 /**
+ * Whether `remark` matches any keyword of a comma separated, case-insensitive
+ * substring list. An empty list matches nothing, so callers that treat "unset"
+ * as "no filtering" keep their unfiltered set.
+ */
+bool remarkMatchesAny(const std::string &remark, const std::string &keywords);
+
+/**
  * Runtime settings forwarded from preferences / request arguments.
  */
 struct Settings
@@ -116,6 +123,14 @@ struct Settings
     std::string geosite_url_prefix = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/";
     std::string geoip_url_prefix = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/";
     std::string cache_path;
+    /// Requested default outbound of the traffic selector. Resolved against the
+    /// selector's members: a value that no longer matches one is dropped rather
+    /// than emitted, because the kernel only rejects a dangling `default` at
+    /// runtime ("default outbound not found"), not in `sing-box check`.
+    std::string default_outbound;
+    /// Comma separated remark keywords restricting the members of the `auto`
+    /// urltest group. Empty keeps every node.
+    std::string auto_include;
     /// Tag of the explicit default HTTP client used for remote rule-set downloads.
     std::string http_client_tag = "hc-default";
 };

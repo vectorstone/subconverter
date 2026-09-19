@@ -157,6 +157,31 @@ def check_platform(name):
         if detour not in tags:
             failures.append(f"{name}: {outbound['tag']} detours to unknown tag {detour}")
 
+    # A larger tun mtu only pays off when the whole path carries jumbo frames,
+    # which a mobile link never does, while it invites PMTU blackholes on the
+    # segments that clamp lower. One conventional value for every platform.
+    for inbound in doc.get("inbounds", []):
+        if inbound.get("type") == "tun" and inbound.get("mtu") != 1500:
+            failures.append(f"{name}: tun mtu {inbound.get('mtu')!r} != 1500")
+
+    # `cache_file.path` decides where the remote rule-set cache lands. It must be
+    # pinned (otherwise it follows the process working directory, so a client
+    # started from another directory re-downloads every rule set), and pinned to
+    # a *relative* name outside the deployment that owns its data directory: the
+    # kernel expands neither `~` nor `$HOME` and refuses to start when the parent
+    # directory is missing ("FATAL start service: initialize cache-file"), so an
+    # absolute path the target cannot guarantee is worse than no path at all.
+    cache = doc.get("experimental", {}).get("cache_file")
+    if cache is not None:
+        path = cache.get("path")
+        if not path:
+            failures.append(f"{name}: cache_file without path leaves the rule-set cache to the process cwd")
+        elif name == "openwrt":
+            if not path.startswith("/"):
+                failures.append(f"{name}: cache_file path {path!r} must be the deployment absolute path")
+        elif path.startswith("/") or path.startswith("~") or "$" in path:
+            failures.append(f"{name}: cache_file path {path!r} must be relative; the kernel does not expand it")
+
     rule_sets = {r.get("tag") for r in doc["route"].get("rule_set", [])}
     for rule in doc["route"]["rules"]:
         for ref in rule.get("rule_set", []) if isinstance(rule.get("rule_set"), list) else []:
@@ -235,10 +260,14 @@ def check_platform(name):
     #     "Not implemented"), so iOS must not receive them.
     #   - Android: connection owner lookups yield package names, never a process
     #     path, so process_name can never match there either.
-    # macOS/Windows/Linux (CLI) and OpenWrt keep them: those do resolve a path.
+    # macOS/Windows/Linux (CLI) and OpenWrt keep them: those do resolve a path —
+    # but only as their own rule object, so a client that cannot resolve one (the
+    # sandboxed Apple clients) merely fails to match that rule instead of taking
+    # the same file's domain and rule_set conditions down with it.
     process_fields = {"process_name", "process_path", "process_path_regex", "user", "user_id"}
     package_fields = {"package_name", "package_name_regex"}
     supports_process = name in ("macos", "windows", "linux", "openwrt")
+    carries_process = False
     for rule in doc["route"]["rules"]:
         present_process = process_fields & set(rule)
         present_package = package_fields & set(rule)
@@ -247,12 +276,17 @@ def check_platform(name):
                             f"and would disable the whole rule")
         if present_package and name != "android":
             failures.append(f"{name}: {sorted(present_package)} is Android-only and would disable the whole rule")
-        # A rule mixing an unsatisfiable process condition with other conditions
-        # is the dangerous case; assert the family is never mixed on those platforms.
-        if not supports_process and present_process:
-            others = set(rule) - process_fields - package_fields - {"action", "outbound", "rule_set"}
-            if others:
-                failures.append(f"{name}: unsatisfiable process condition merged with {sorted(others)}")
+        carries_process = carries_process or bool(present_process)
+        # A process condition sharing a rule with any other condition family is
+        # the dangerous case, on every platform: drop the process item and the
+        # file's domains and rule sets stop matching with it.
+        others = set(rule) - process_fields - package_fields - {"action", "outbound", "rule_set"}
+        if present_process and others:
+            failures.append(f"{name}: rule {rule} mixes {sorted(present_process)} with {sorted(others)}; "
+                            f"a process condition is hard-ANDed with the rest of its rule")
+    if supports_process and not carries_process:
+        # Without this the "never mixed" assertion above would pass on an empty set.
+        failures.append(f"{name}: the fixture carries no process condition at all; the split assertion is vacuous")
 
     # skeleton mode: minimal groups, remapped rules, remote rule-set references
     expected_groups = {"proxy", "auto", "ChainProxyEntry", "ChainProxyExit"}
@@ -269,6 +303,17 @@ def check_platform(name):
     # client can never engage the chain. `auto` / `ChainProxyEntry` must keep
     # excluding them or landing.detour -> entry group -> landing is a cycle.
     by_tag = {o.get("tag"): o for o in doc.get("outbounds", [])}
+    # A selector without `default` silently takes its first member, so the member
+    # order would be the real decision. `proxy` keeps `auto` first for
+    # compatibility, but the generator must not invent a landing on its own: that
+    # is a deployment decision handed in as an argument (asserted below).
+    if by_tag.get("proxy", {}).get("default") is not None:
+        failures.append(f"{name}: proxy must not carry a default unless one was requested")
+    # GLOBAL backs the clash_api "Global" switch and its first member is DIRECT,
+    # so an implicit default would make Global mode route everything direct.
+    global_group = by_tag.get("GLOBAL")
+    if global_group is not None and global_group.get("default") != "proxy":
+        failures.append(f"{name}: GLOBAL must default to 'proxy', got {global_group.get('default')!r}")
     chain_exit = by_tag.get("ChainProxyExit")
     if not chain_exit:
         failures.append(f"{name}: ChainProxyExit missing for a chained subscription")
@@ -376,6 +421,66 @@ for landing in ("LAND-OK", "CYC-1", "CYC-2", "DANGLE", "LAND-DIAL"):
 print("  ok: valid chain kept, dialer magic resolved, cycles and dangling references dropped")
 print("  ok: landings selectable from proxy, excluded from auto/ChainProxyEntry")
 PY
+
+echo "== traffic selector default and urltest narrowing"
+gen_tuned() {
+    curl -s "http://127.0.0.1:$PORT/sub?target=singbox&singbox_platform=macos&url=http%3A%2F%2F127.0.0.1%3A$FIXTURE_PORT%2Fsubscription.yaml$1"
+}
+gen_tuned "&singbox_default=VMess&singbox_auto_include=Trojan" >"$WORK/tuned.json"
+gen_tuned "&singbox_default=NOPE&singbox_auto_include=ZZZ" >"$WORK/untuned.json"
+python3 - "$WORK" <<'PY'
+import json, sys, pathlib
+
+work = pathlib.Path(sys.argv[1])
+failures = []
+base = json.loads((work / "macos.json").read_text())
+tuned = json.loads((work / "tuned.json").read_text())
+untuned = json.loads((work / "untuned.json").read_text())
+
+def pick(doc, tag):
+    return next(o for o in doc["outbounds"] if o.get("tag") == tag)
+
+base_proxy = pick(base, "proxy")
+tuned_proxy = pick(tuned, "proxy")
+# The requested remark resolves to the node it names (substring, case-insensitive)...
+if tuned_proxy.get("default") != "VMess-WS":
+    failures.append(f"tuned: proxy default {tuned_proxy.get('default')!r} != 'VMess-WS'")
+# ...without reordering or dropping members: `auto` stays first, so a client or a
+# reader that ignores `default` sees exactly the previous group.
+if base_proxy["outbounds"] != tuned_proxy["outbounds"]:
+    failures.append("tuned: proxy membership changed")
+if base_proxy["outbounds"][0] != "auto":
+    failures.append("tuned: proxy must keep 'auto' as its first member")
+# `auto` is the only health-checked group, so narrowing its member set is what
+# removes the startup probe storm (and the every-5-minutes rescan).
+if pick(tuned, "auto")["outbounds"] != ["Trojan-01"]:
+    failures.append(f"tuned: auto members {pick(tuned, 'auto')['outbounds']} != ['Trojan-01']")
+if pick(base, "auto")["outbounds"] == pick(tuned, "auto")["outbounds"]:
+    failures.append("tuned: auto narrowing changed nothing; the assertion is vacuous")
+# Selectors are deliberately not narrowed: ChainProxyEntry decides which nodes can
+# serve as a chain entry.
+if pick(tuned, "ChainProxyEntry")["outbounds"] != pick(base, "ChainProxyEntry")["outbounds"]:
+    failures.append("tuned: ChainProxyEntry must not follow the auto keyword filter")
+# Unresolvable values degrade to the previous behaviour instead of shipping a
+# dangling reference: the kernel accepts one in `sing-box check` and then refuses
+# to start ("default outbound not found").
+if pick(untuned, "proxy").get("default") is not None:
+    failures.append("untuned: an unresolvable singbox_default must not be emitted")
+if pick(untuned, "auto")["outbounds"] != pick(base, "auto")["outbounds"]:
+    failures.append("untuned: an unmatched singbox_auto_include must keep every member")
+if pick(untuned, "GLOBAL").get("default") != "proxy":
+    failures.append("untuned: the GLOBAL default must not depend on the new options")
+
+if failures:
+    for line in failures:
+        print("  FAIL " + line)
+    sys.exit(1)
+PY
+grep -q "singbox_default 'NOPE' is not a member" "$WORK/converter.log" \
+    || fail "an unresolvable singbox_default did not warn"
+grep -q "singbox_auto_include matched no node" "$WORK/converter.log" \
+    || fail "an unmatched singbox_auto_include did not warn"
+pass "selector default resolves against members; urltest member set narrows by keyword"
 
 code=$(curl -s -o "$WORK/strict.txt" -w '%{http_code}' \
     "http://127.0.0.1:$PORT/sub?target=singbox&singbox_platform=macos&singbox_chain_strict=1&url=http%3A%2F%2F127.0.0.1%3A$FIXTURE_PORT%2Fchain.yaml")

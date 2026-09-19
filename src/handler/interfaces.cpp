@@ -558,6 +558,13 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
             sb.local_ruleset_dir = sbArg;
         if(!(sbArg = getUrlArg(argument, "singbox_cache_path")).empty())
             sb.cache_path = sbArg;
+        /// Preferred landing of the traffic selector (a group tag or a node
+        /// remark; resolved against the selector's members, ignored when it does
+        /// not resolve) and an optional remark keyword list narrowing `auto`.
+        if(!(sbArg = getUrlArg(argument, "singbox_default")).empty())
+            sb.default_outbound = sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_auto_include")).empty())
+            sb.auto_include = sbArg;
         if(!(sbArg = getUrlArg(argument, "singbox_clash_api")).empty())
             sb.clash_api_controller = sbArg;
         if(!(sbArg = getUrlArg(argument, "singbox_clash_api_secret")).empty())

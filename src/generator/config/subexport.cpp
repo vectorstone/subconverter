@@ -3002,7 +3002,29 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
             if (std::find(landing_nodes.begin(), landing_nodes.end(), remark) == landing_nodes.end())
                 normal_nodes.emplace_back(remark);
 
-        auto push_skeleton_group = [&](const char *type, const char *tag, const string_array &members)
+        /// Only `auto` is health-checked, and sing-box probes every member the
+        /// moment the tunnel starts — no concurrency limit, no stagger — then
+        /// repeats the whole scan every `interval` (5m). A subscription with
+        /// hundreds of nodes therefore opens hundreds of simultaneous outbound
+        /// connections on startup, which is precisely what a constrained link
+        /// cannot absorb. urltest exposes no knob for that, so the member set is
+        /// the only lever. The selectors are deliberately left alone: they probe
+        /// nothing, and ChainProxyEntry's membership decides chain reachability.
+        string_array auto_nodes = normal_nodes;
+        if (!ext.singbox_settings.auto_include.empty())
+        {
+            string_array filtered;
+            for (const std::string &remark : normal_nodes)
+                if (singbox::remarkMatchesAny(remark, ext.singbox_settings.auto_include))
+                    filtered.emplace_back(remark);
+            if (filtered.empty())
+                writeLog(0, "sing-box: singbox_auto_include matched no node, 'auto' keeps every member", LOG_LEVEL_WARNING);
+            else
+                auto_nodes = filtered;
+        }
+
+        auto push_skeleton_group = [&](const char *type, const char *tag, const string_array &members,
+                                       const char *default_tag = nullptr)
         {
             rapidjson::Value group(rapidjson::kObjectType);
             group.AddMember("type", rapidjson::Value(type, allocator), allocator);
@@ -3020,6 +3042,11 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
                 member_list.emplace_back("DIRECT");
             }
             group.AddMember("outbounds", group_outbounds, allocator);
+            /// A selector without `default` silently takes its first member, so
+            /// the member order would be the real decision. Only set it when it
+            /// resolves, or the kernel refuses to start the outbound.
+            if (default_tag && std::find(member_list.begin(), member_list.end(), default_tag) != member_list.end())
+                group.AddMember("default", rapidjson::Value(default_tag, allocator), allocator);
             if (std::string(type) == "urltest")
             {
                 group.AddMember("url", rapidjson::Value("https://www.gstatic.com/generate_204", allocator), allocator);
@@ -3041,7 +3068,7 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
         proxy_members.insert(proxy_members.end(), landing_nodes.begin(), landing_nodes.end());
         proxy_members.insert(proxy_members.end(), normal_nodes.begin(), normal_nodes.end());
         push_skeleton_group("selector", "proxy", proxy_members);
-        push_skeleton_group("urltest", "auto", normal_nodes);
+        push_skeleton_group("urltest", "auto", auto_nodes);
         if (!landing_nodes.empty())
         {
             push_skeleton_group("selector", chain_entry_group_name, [&]{ string_array m{ "auto" }; m.insert(m.end(), normal_nodes.begin(), normal_nodes.end()); return m; }());
@@ -3055,7 +3082,10 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
             {
                 string_array global_members{ "DIRECT", "proxy", "auto" };
                 global_members.insert(global_members.end(), remarks_list.begin(), remarks_list.end());
-                push_skeleton_group("selector", "GLOBAL", global_members);
+                /// GLOBAL backs the clash_api "Global" switch, so its implicit
+                /// first member (DIRECT) would make Global mode mean "everything
+                /// direct" — the opposite of what the mode asks for.
+                push_skeleton_group("selector", "GLOBAL", global_members, "proxy");
             }
         }
     }

@@ -26,6 +26,20 @@ Value makeString(const std::string &value, Document::AllocatorType &allocator)
     return result;
 }
 
+/**
+ * Case-insensitive substring test, used to match a node remark against the
+ * operator supplied keywords: remarks carry emoji, provider prefixes and
+ * varying case, so an exact comparison would be unusable in practice.
+ */
+bool containsIgnoreCase(const std::string &haystack, const std::string &needle)
+{
+    if(needle.empty())
+        return false;
+    const std::string lower_haystack = toLower(haystack);
+    const std::string lower_needle = toLower(needle);
+    return lower_haystack.find(lower_needle) != std::string::npos;
+}
+
 Value makeArray(const std::vector<std::string> &values, Document::AllocatorType &allocator)
 {
     Value result(kArrayType);
@@ -252,6 +266,22 @@ void sanitizeGroups(Document &doc, const std::string &direct_tag, std::vector<st
 
 }
 
+bool remarkMatchesAny(const std::string &remark, const std::string &keywords)
+{
+    std::size_t begin = 0;
+    while(begin <= keywords.size())
+    {
+        const std::size_t end = keywords.find(',', begin);
+        const std::size_t length = end == std::string::npos ? std::string::npos : end - begin;
+        if(containsIgnoreCase(remark, trim(keywords.substr(begin, length))))
+            return true;
+        if(end == std::string::npos)
+            break;
+        begin = end + 1;
+    }
+    return false;
+}
+
 bool parsePlatform(const std::string &name, Platform &platform)
 {
     const std::string key = toLower(trim(name));
@@ -312,17 +342,32 @@ const Profile &profileOf(Platform platform)
     // and removed in 1.17.0, and `gvisor`/`mixed` additionally hard-fail on every
     // client built without `with_gvisor` (all official Apple clients). Omitting
     // the field lets each kernel pick its best available implementation.
+    //
+    // Every platform shares one tun mtu (1500). A larger value (the previous
+    // 9000/8500) only pays off when the whole path carries jumbo frames, which
+    // it never does over a mobile link, while it does invite PMTU blackholes on
+    // the segments that clamp lower. Measured as neutral in the macOS field
+    // report; kept conventional because being neutral is the point.
+    //
+    // `default_cache_path` is only read where `cache_file` is enabled. It stays
+    // a *relative* name on purpose: the kernel expands neither `~` nor `$HOME`
+    // and refuses to start when the parent directory is missing ("FATAL start
+    // service: initialize cache-file"), so an absolute path would only be safe
+    // where the deployment itself guarantees the directory (see OpenWrt). A
+    // relative name resolves against the process working directory, which is
+    // what the kernel already defaults to — writing it out keeps the rule-set
+    // cache pinned to a known name instead of relying on that default.
     static const Profile macos_profile = {
-        true, true, 9000, true, true, false, false, false, false,
-        true, true, true, "", false, "warn", true, "prefer_ipv4"
+        true, true, 1500, true, true, false, false, false, false,
+        true, true, true, "cache.db", false, "warn", true, "prefer_ipv4"
     };
     static const Profile windows_profile = {
-        true, true, 9000, true, true, false, false, false, false,
-        true, true, true, "", false, "warn", true, "prefer_ipv4"
+        true, true, 1500, true, true, false, false, false, false,
+        true, true, true, "cache.db", false, "warn", true, "prefer_ipv4"
     };
     static const Profile linux_profile = {
-        true, true, 9000, true, true, false, false, false, false,
-        true, true, true, "", false, "warn", true, "prefer_ipv4"
+        true, true, 1500, true, true, false, false, false, false,
+        true, true, true, "cache.db", false, "warn", true, "prefer_ipv4"
     };
     // android: route_auto_detect_interface must stay true. `constant.IsLinux`
     // covers Android, so the kernel accepts the field, and it is the only path
@@ -334,15 +379,15 @@ const Profile &profileOf(Platform platform)
     // iOS is the opposite: ExtensionPlatformInterface.usePlatformAutoDetectControl()
     // returns false, so the field would merely bind physical NICs.
     static const Profile android_profile = {
-        false, true, 8500, true, false, false, true, false, true,
-        false, false, false, "", false, "warn", true, "prefer_ipv4"
+        false, true, 1500, true, false, false, true, false, true,
+        false, false, false, "cache.db", false, "warn", true, "prefer_ipv4"
     };
     static const Profile ios_profile = {
-        false, true, 8500, false, false, false, true, false, false,
-        false, false, false, "", false, "warn", true, "prefer_ipv4"
+        false, true, 1500, false, false, false, true, false, false,
+        false, false, false, "cache.db", false, "warn", true, "prefer_ipv4"
     };
     static const Profile openwrt_profile = {
-        false, true, 9000, true, true, true, false, true, false,
+        false, true, 1500, true, true, true, false, true, false,
         true, true, true, "/opt/open-box/data/cache.db", true, "warn", false, "ipv4_only"
     };
 
@@ -585,6 +630,9 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
         {
             Value cache(kObjectType);
             cache.AddMember("enabled", true, allocator);
+            /// The request may override the location (singbox_cache_path); the
+            /// platform default keeps the rule-set cache out of the caller's
+            /// hands so a short link cannot point it at an unwritable path.
             const std::string path = settings.cache_path.empty() ? profile.default_cache_path : settings.cache_path;
             if(!path.empty())
                 cache.AddMember("path", makeString(path, allocator), allocator);
@@ -722,10 +770,82 @@ void dedupeRules(Document &doc, std::vector<std::string> &warnings)
     warnings.push_back("removed " + std::to_string(removed) + " duplicate route rule(s)");
 }
 
+/**
+ * Pin the requested outbound as the traffic selector's explicit `default`.
+ *
+ * Without it a selector falls back to its first member, which here is `auto` —
+ * a urltest group, so the entry landing is re-decided by latency during the
+ * startup convergence window and again on every `interval`, and a transient
+ * whole-group failure (a DNS race at startup marks every member unreachable)
+ * silently moves the traffic. An explicit `default` is the only way a generated
+ * configuration can name a stable landing.
+ *
+ * The value is a hint resolved against the selector's *current* members: one
+ * that matches no member (the node left the subscription) or several (an
+ * ambiguous keyword) is dropped with a warning instead of shipped. That is not
+ * cosmetic — the kernel accepts a dangling `default` in `sing-box check` and
+ * then refuses to start at runtime.
+ */
+void applyGroupDefault(Document &doc, const Settings &settings, std::vector<std::string> &warnings)
+{
+    const std::string requested = trim(settings.default_outbound);
+    if(requested.empty())
+        return;
+    if(!doc.HasMember("outbounds") || !doc["outbounds"].IsArray())
+        return;
+    auto &allocator = doc.GetAllocator();
+
+    bool found_group = false;
+    for(Value &outbound : doc["outbounds"].GetArray())
+    {
+        if(memberString(outbound, "type") != "selector" || memberString(outbound, "tag") != settings.proxy_tag)
+            continue;
+        found_group = true;
+        const std::vector<std::string> members = stringArray(outbound, "outbounds");
+
+        std::string resolved;
+        std::size_t hits = 0;
+        for(const std::string &member : members)
+        {
+            if(toLower(member) != toLower(requested))
+                continue;
+            resolved = member;
+            hits = 1;
+            break;
+        }
+        if(resolved.empty())
+            for(const std::string &member : members)
+                if(containsIgnoreCase(member, requested))
+                {
+                    resolved = member;
+                    ++hits;
+                }
+        if(hits > 1)
+        {
+            warnings.push_back("singbox_default '" + requested + "' matches " +
+                               std::to_string(hits) + " members of '" + settings.proxy_tag + "', ignored");
+            return;
+        }
+        if(resolved.empty())
+        {
+            warnings.push_back("singbox_default '" + requested + "' is not a member of '" +
+                               settings.proxy_tag + "', ignored");
+            return;
+        }
+        outbound | AddMemberOrReplace("default", makeString(resolved, allocator), allocator);
+        return;
+    }
+    if(!found_group)
+        warnings.push_back("singbox_default '" + requested + "' ignored: no '" + settings.proxy_tag + "' selector exists");
+}
+
 void finalize(Document &doc, const Settings &settings, std::vector<std::string> &warnings)
 {
     dedupeRules(doc, warnings);
     sanitizeGroups(doc, settings.direct_tag, warnings);
+    /// After sanitizeGroups: it drops members that no longer resolve, and the
+    /// default must be picked from the surviving set.
+    applyGroupDefault(doc, settings, warnings);
     ensureProxyReference(doc, settings, warnings);
 }
 
@@ -869,6 +989,23 @@ bool validate(Document &doc, std::string &error)
                     error = "group '" + tag + "' references unknown tag '" + member + "'";
                     return false;
                 }
+            /// `sing-box check` accepts a `default` that is not a member and the
+            /// kernel then refuses to start ("default outbound not found"), so
+            /// the check has to live here.
+            if(outbound.HasMember("default"))
+            {
+                const std::string def = memberString(outbound, "default");
+                if(def.empty())
+                {
+                    error = "group '" + tag + "' has a malformed default";
+                    return false;
+                }
+                if(std::find(members.begin(), members.end(), def) == members.end())
+                {
+                    error = "group '" + tag + "' defaults to '" + def + "', which is not one of its members";
+                    return false;
+                }
+            }
             edges[tag] = members;
         }
         else if(outbound.HasMember("detour"))

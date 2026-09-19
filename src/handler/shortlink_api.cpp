@@ -51,6 +51,8 @@ struct ShortLinkConfig
     std::string clash_config = shortlink_clash_lite_config_path;
     bool clash_expand = false;
     std::string singbox_platform = "macos";
+    std::string singbox_default;
+    std::string singbox_auto_include;
 };
 
 ShortLinkConfig config;
@@ -474,6 +476,10 @@ std::string conversion_snapshot(const string_array &links, const std::string &ta
     if(target == "singbox")
     {
         conversion_request.argument.emplace("singbox_platform", platform);
+        if(!config.singbox_default.empty())
+            conversion_request.argument.emplace("singbox_default", config.singbox_default);
+        if(!config.singbox_auto_include.empty())
+            conversion_request.argument.emplace("singbox_auto_include", config.singbox_auto_include);
     }
     else
     {
@@ -589,6 +595,12 @@ bool initializeShortLinkService()
         else
             config.singbox_platform = singbox::platformName(parsed_platform);
     }
+    // Operator side sing-box tuning. Both values describe the operator's own
+    // subscription (a preferred landing, and remark keywords selecting the
+    // urltest members), so they live in the deployment environment rather than
+    // in this repository or in a client-supplied query string.
+    config.singbox_default = trim(getEnv("SHORTLINK_SINGBOX_DEFAULT"));
+    config.singbox_auto_include = trim(getEnv("SHORTLINK_SINGBOX_AUTO_INCLUDE"));
     configure_shortlink_clash_profile();
     if(config.connection_string.empty() || config.encryption_key.empty())
     {
