@@ -2,6 +2,9 @@
 #include <cctype>
 #include <functional>
 #include <set>
+#include <sstream>
+
+#include <rapidjson/stringbuffer.h>
 
 #include "generator/config/singbox.h"
 #include "utils/rapidjson_extra.h"
@@ -44,18 +47,38 @@ void addSpec(std::vector<RuleSetSpec> &specs, const std::string &tag)
 
 /**
  * Derive the tun gateway address (the peer address used for tun level DNS
- * hijacking) from the tun address, e.g. "172.19.0.1/30" -> "172.19.0.2".
+ * hijacking) from the tun address, e.g. "172.19.0.1/30" -> "172.19.0.2" and
+ * "fdfe:dcba:9876::1/126" -> "fdfe:dcba:9876::2".
+ *
+ * Both families are handled the same way: the last group is incremented in
+ * place. Keeping this family agnostic matters because the tun inbound may carry
+ * an IPv4 and an IPv6 address at once, and each one needs its own DNS listener.
+ * An address the parser does not understand is returned without its prefix
+ * rather than guessed at.
  */
 std::string tunGateway(const std::string &address)
 {
     const std::string ip = address.substr(0, address.find('/'));
-    const std::size_t dot = ip.rfind('.');
-    if(dot == std::string::npos)
+    const bool ipv6 = ip.find(':') != std::string::npos;
+    const std::size_t separator = ip.rfind(ipv6 ? ':' : '.');
+    if(separator == std::string::npos || separator == 0)
         return ip;
-    const std::string last = ip.substr(dot + 1);
-    if(last.empty() || !std::all_of(last.begin(), last.end(), [](unsigned char c) { return std::isdigit(c); }))
+    const std::string last = ip.substr(separator + 1);
+    const bool valid = !last.empty() && std::all_of(last.begin(), last.end(), [ipv6](unsigned char c) {
+        return ipv6 ? std::isxdigit(c) != 0 : std::isdigit(c) != 0;
+    });
+    if(!valid)
         return ip;
-    return ip.substr(0, dot + 1) + std::to_string(std::stoi(last) + 1);
+    if(ipv6)
+    {
+        const unsigned long group = std::stoul(last, nullptr, 16);
+        if(group == 0xffff)
+            return ip;
+        std::ostringstream next;
+        next << std::hex << group + 1;
+        return ip.substr(0, separator + 1) + next.str();
+    }
+    return ip.substr(0, separator + 1) + std::to_string(std::stoi(last) + 1);
 }
 
 std::string memberString(const Value &value, const char *name)
@@ -435,7 +458,11 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
             if(profile.tun_dns_hijack)
             {
                 tun.AddMember("dns_mode", makeString("hijack", allocator), allocator);
+                /// One listener per tun address: a client resolving over the IPv6
+                /// address must not fall outside the hijacked range.
                 std::vector<std::string> dns_address{tunGateway(settings.tun_address)};
+                if(settings.ipv6)
+                    dns_address.push_back(tunGateway(settings.tun_address6));
                 tun.AddMember("dns_address", makeArray(dns_address, allocator), allocator);
             }
             inbounds.PushBack(tun, allocator);
@@ -611,8 +638,93 @@ void applyRuleSets(Document &doc, const std::vector<RuleSetSpec> &rule_sets, con
     doc["route"] | AddMemberOrReplace("rule_set", array, allocator);
 }
 
+/**
+ * Deterministic serialization with object members sorted by name, so two rules
+ * compare equal whenever they carry the same content regardless of the order
+ * their keys were inserted in.
+ */
+void appendCanonicalJson(const Value &value, std::string &out)
+{
+    if(value.IsObject())
+    {
+        std::vector<std::pair<std::string, const Value *>> members;
+        members.reserve(value.MemberCount());
+        for(auto it = value.MemberBegin(); it != value.MemberEnd(); ++it)
+            members.emplace_back(std::string(it->name.GetString(), it->name.GetStringLength()), &it->value);
+        std::sort(members.begin(), members.end(),
+                  [](const auto &left, const auto &right) { return left.first < right.first; });
+        out += '{';
+        for(std::size_t i = 0; i < members.size(); ++i)
+        {
+            if(i)
+                out += ',';
+            const Value name(members[i].first.c_str(), static_cast<SizeType>(members[i].first.size()));
+            appendCanonicalJson(name, out);
+            out += ':';
+            appendCanonicalJson(*members[i].second, out);
+        }
+        out += '}';
+        return;
+    }
+    if(value.IsArray())
+    {
+        out += '[';
+        for(SizeType i = 0; i < value.Size(); ++i)
+        {
+            if(i)
+                out += ',';
+            appendCanonicalJson(value[i], out);
+        }
+        out += ']';
+        return;
+    }
+    StringBuffer buffer;
+    Writer<StringBuffer> writer(buffer);
+    value.Accept(writer);
+    out += buffer.GetString();
+}
+
+/**
+ * Drop route rules that repeat an earlier rule verbatim.
+ *
+ * Routing inside route.rules is first-match, so an exact duplicate is
+ * unreachable: removing it changes no routing decision while keeping the
+ * emitted list — and therefore the `match[N]` indices sing-box logs — one-to-one
+ * with the rules that actually decide traffic. A rule that merely overlaps an
+ * earlier one is left alone; it still owns the traffic that rule misses.
+ */
+void dedupeRules(Document &doc, std::vector<std::string> &warnings)
+{
+    if(!doc.HasMember("route") || !doc["route"].IsObject())
+        return;
+    Value &route = doc["route"];
+    if(!route.HasMember("rules") || !route["rules"].IsArray())
+        return;
+
+    auto &allocator = doc.GetAllocator();
+    std::set<std::string> seen;
+    Value unique(kArrayType);
+    SizeType removed = 0;
+    for(Value &rule : route["rules"].GetArray())
+    {
+        std::string key;
+        appendCanonicalJson(rule, key);
+        if(!seen.insert(key).second)
+        {
+            ++removed;
+            continue;
+        }
+        unique.PushBack(rule, allocator);
+    }
+    if(!removed)
+        return;
+    route | AddMemberOrReplace("rules", unique, allocator);
+    warnings.push_back("removed " + std::to_string(removed) + " duplicate route rule(s)");
+}
+
 void finalize(Document &doc, const Settings &settings, std::vector<std::string> &warnings)
 {
+    dedupeRules(doc, warnings);
     sanitizeGroups(doc, settings.direct_tag, warnings);
     ensureProxyReference(doc, settings, warnings);
 }

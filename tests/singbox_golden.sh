@@ -163,6 +163,17 @@ def check_platform(name):
             if ref not in rule_sets:
                 failures.append(f"{name}: rule references undefined rule_set {ref}")
 
+    # Routing is first-match, so a rule that repeats an earlier one verbatim is
+    # unreachable: it cannot change a decision, but it does make the match[N]
+    # indices in the client log point at rules that never fire. A rule that only
+    # overlaps an earlier one must survive — it still owns what that rule misses.
+    seen_rules = set()
+    for index, rule in enumerate(doc["route"]["rules"]):
+        key = json.dumps(rule, sort_keys=True)
+        if key in seen_rules:
+            failures.append(f"{name}: route rule {index} duplicates an earlier rule")
+        seen_rules.add(key)
+
     rule_types = {r.get("type") for r in doc["route"].get("rule_set", [])}
     if name == "openwrt":
         if rule_types - {"local"}:
@@ -295,6 +306,47 @@ if failures:
         print("  FAIL " + line)
     sys.exit(1)
 print("  ok: all structural assertions passed")
+PY
+
+echo "== dual stack tun"
+# The tun may carry an IPv4 and an IPv6 address at once, and a client resolves
+# over whichever one it was handed: every tun address needs its own hijacked-DNS
+# listener, or the IPv6 address falls outside the hijacked range.
+for platform in android ios; do
+    curl -s -o "$WORK/$platform-ipv6.json" \
+        "http://127.0.0.1:$PORT/sub?target=singbox&singbox_platform=$platform&singbox_ipv6=1&url=http%3A%2F%2F127.0.0.1%3A$FIXTURE_PORT%2Fsubscription.yaml"
+done
+python3 - "$WORK" <<'PY'
+import json, sys, pathlib
+
+work = pathlib.Path(sys.argv[1])
+failures = []
+
+def tun_of(path):
+    doc = json.loads(path.read_text())
+    return next(i for i in doc["inbounds"] if i.get("type") == "tun")
+
+for platform in ("android", "ios"):
+    single = tun_of(work / f"{platform}.json")
+    if len(single.get("dns_address", [])) != 1:
+        failures.append(f"{platform}: IPv4-only tun must hijack DNS on a single address")
+
+    dual = tun_of(work / f"{platform}-ipv6.json")
+    addresses = dual.get("address", [])
+    listeners = dual.get("dns_address", [])
+    if not any(":" in a for a in addresses):
+        failures.append(f"{platform}: singbox_ipv6=1 did not add an IPv6 tun address")
+    if len(listeners) != len(addresses):
+        failures.append(f"{platform}: {len(addresses)} tun addresses but {len(listeners)} DNS listeners")
+    for address, listener in zip(addresses, listeners):
+        if (":" in address) != (":" in listener):
+            failures.append(f"{platform}: DNS listener {listener!r} does not match the family of {address!r}")
+
+if failures:
+    for line in failures:
+        print("  FAIL " + line)
+    sys.exit(1)
+print("  ok: one hijacked-DNS listener per tun address family")
 PY
 
 echo "== chained proxy handling"
