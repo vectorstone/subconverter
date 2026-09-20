@@ -19,6 +19,18 @@ The service exposes the subconverter container on 127.0.0.1:15052 by default. Pu
 
 New and explicitly refreshed short links use the bundled Lite Clash profile by default (`SHORTLINK_CLASH_CONFIG=config/default_clash_lite.ini`, `SHORTLINK_CLASH_EXPAND=false`). The profile emits rule providers instead of embedding the full rule corpus. `SHORTLINK_LITE_MAX_OUTPUT_BYTES` defaults to 262144 and applies to the `clash` target only; a `target=singbox` snapshot is bounded by `SHORTLINK_MAX_OUTPUT_BYTES` instead. Set `SHORTLINK_CLASH_CONFIG=config/default_clash_chainproxy.ini` and `SHORTLINK_CLASH_EXPAND=true` only for an operational rollback. Existing snapshots are not rewritten when these variables change.
 
+### sing-box intranet options
+
+Intranet-only domains cannot be answered by public resolvers, and even once resolved their traffic would still follow `route.final` into the proxy, whose remote node cannot reach the intranet either. sing-box short links therefore support optional intranet settings with the precedence **per-link options in the portal > deployment environment > not emitted**:
+
+| Variable | Meaning | Example |
+| --- | --- | --- |
+| `SHORTLINK_SINGBOX_DNS_INTERNAL` | Intranet DNS resolver, bare IP (v4/v6). The generated upstream dials directly and never touches route rules | `192.0.2.53` |
+| `SHORTLINK_SINGBOX_INTERNAL_DOMAINS` | Comma separated domain suffixes resolved through that resolver (max 32); the rule is emitted before the geosite-cn rule | `a.internal.example.com,b.internal.example.org` |
+| `SHORTLINK_SINGBOX_DIRECT_CIDR` | Comma separated destination CIDRs forced onto the direct outbound (max 32); covers company-owned public-looking IDC ranges that `ip_is_private` never matches | `198.51.100.0/24,203.0.113.0/24` |
+
+Put the real values in the protected `.env` and pass them through the compose `environment` block. Malformed values are dropped with a startup warning, never used silently. In the Web UI (target sing-box, advanced section) the three fields map to `singbox_options.{dns_internal,internal_domains,direct_cidr}` of `POST /api/short-links`; an empty field means "use the server default", every field is strictly validated server-side (unknown keys are rejected with 400), and options are stored encrypted with the link so refreshes reproduce the same conversion. Pre-existing links simply fall back to the environment defaults.
+
 The complete API, PostgreSQL schema, snapshot chaining behavior, encryption, quotas, and rollback procedure are documented in docs/short-link-postgresql-plan.md.
 Or run in docker-compose:
 ```yaml

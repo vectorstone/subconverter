@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <atomic>
 #include <ctime>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include "storage/postgres_store.h"
 #include "utils/base64/base64.h"
 #include "utils/logger.h"
+#include "utils/network.h"
 #include "utils/string.h"
 #include "utils/system.h"
 #include "utils/urlencode.h"
@@ -53,6 +55,13 @@ struct ShortLinkConfig
     std::string singbox_platform = "macos";
     std::string singbox_default;
     std::string singbox_auto_include;
+    // Deployment-level intranet handling for sing-box snapshots. The real
+    // values (intranet resolver, company domain suffixes, IDC ranges) live in
+    // the deployment environment; a short link's own singbox_options fields
+    // override these one field at a time.
+    std::string singbox_dns_internal;
+    std::string singbox_internal_domains;
+    std::string singbox_direct_cidr;
 };
 
 ShortLinkConfig config;
@@ -340,7 +349,19 @@ bool valid_source_link(const std::string &link)
     return valid_port_in_link(link);
 }
 
-std::string build_source_payload(const string_array &links, const std::string &target, const std::string &platform)
+/// Per-short-link sing-box options. Stored inside the encrypted source payload
+/// and mapped onto a fixed set of /sub arguments at conversion time; the mapping
+/// is a whitelist, never a raw passthrough of caller-supplied query parameters.
+struct SingBoxLinkOptions
+{
+    std::string dns_internal;
+    std::string internal_domains;
+    std::string direct_cidr;
+
+    bool empty() const { return dns_internal.empty() && internal_domains.empty() && direct_cidr.empty(); }
+};
+
+std::string build_source_payload(const string_array &links, const std::string &target, const std::string &platform, const SingBoxLinkOptions &options)
 {
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -356,6 +377,19 @@ std::string build_source_payload(const string_array &links, const std::string &t
     writer.EndArray();
     writer.Key("insert");
     writer.Bool(false);
+    // Per-link sing-box options ride along so a refresh reproduces the same
+    // conversion. Payloads written before this member existed lack it and fall
+    // back to the deployment defaults, which keeps the format backward
+    // compatible without a schema migration.
+    writer.Key("options");
+    writer.StartObject();
+    writer.Key("dns_internal");
+    writer.String(options.dns_internal.c_str());
+    writer.Key("internal_domains");
+    writer.String(options.internal_domains.c_str());
+    writer.Key("direct_cidr");
+    writer.String(options.direct_cidr.c_str());
+    writer.EndObject();
     writer.EndObject();
     return buffer.GetString();
 }
@@ -372,7 +406,141 @@ std::string shortlink_download_url(const std::string &url)
     return url + (url.find('?') == std::string::npos ? "?download=1" : "&download=1");
 }
 
-bool parse_shortlink_request(const std::string &body, string_array &links, std::string &target, std::string &platform, int &ttl, std::string &name, std::string &error)
+/// Hostname suffix: lowercase labels of [a-z0-9-] joined by dots, no empty or
+/// hyphen-led labels, 63 bytes per label and 255 in total.
+bool valid_domain_suffix(const std::string &domain)
+{
+    if(domain.empty() || domain.size() > 255)
+        return false;
+    std::size_t label_start = 0;
+    for(std::size_t i = 0; i <= domain.size(); ++i)
+    {
+        if(i == domain.size() || domain[i] == '.')
+        {
+            if(i == label_start || i - label_start > 63)
+                return false;
+            if(domain[label_start] == '-' || domain[i - 1] == '-')
+                return false;
+            label_start = i + 1;
+        }
+        else
+        {
+            const char c = domain[i];
+            if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'))
+                return false;
+        }
+    }
+    return true;
+}
+
+/// Bare IP or IP/prefix, with the prefix bounded by the address family.
+bool valid_cidr(const std::string &cidr)
+{
+    const std::size_t slash = cidr.find('/');
+    const std::string address = slash == std::string::npos ? cidr : cidr.substr(0, slash);
+    const bool v6 = isIPv6(address);
+    if(!isIPv4(address) && !v6)
+        return false;
+    if(slash == std::string::npos)
+        return true;
+    const std::string prefix = cidr.substr(slash + 1);
+    if(prefix.empty() || prefix.find_first_not_of("0123456789") != std::string::npos)
+        return false;
+    const int bits = to_int(prefix, -1);
+    return bits >= 0 && bits <= (v6 ? 128 : 32);
+}
+
+/// Canonicalize a comma separated option list: trim, optionally lowercase, drop
+/// empties and duplicates. Mirrors the generator-side list handling so a stored
+/// payload and the emitted rule cannot drift apart.
+bool parse_option_list(const std::string &raw, std::size_t max_items, bool lowercase, const std::string &field, std::string &out, std::string &error)
+{
+    std::set<std::string> seen;
+    std::vector<std::string> items;
+    for(std::string item : split(raw, ","))
+    {
+        item = trim(item);
+        if(item.empty())
+            continue;
+        if(lowercase)
+            item = toLower(item);
+        if(seen.insert(item).second)
+            items.push_back(item);
+    }
+    if(items.size() > max_items)
+    {
+        error = field + " has too many entries (max " + std::to_string(max_items) + ")";
+        return false;
+    }
+    out = join(items, ",");
+    return true;
+}
+
+/// Read the optional singbox_options object. Only the three known keys pass;
+/// anything else is rejected so the argument whitelist cannot erode silently.
+bool parse_singbox_options(const rapidjson::Value &document, SingBoxLinkOptions &options, std::string &error)
+{
+    if(!document.HasMember("singbox_options"))
+        return true;
+    const rapidjson::Value &member = document["singbox_options"];
+    if(!member.IsObject())
+    {
+        error = "singbox_options must be an object";
+        return false;
+    }
+    for(auto it = member.MemberBegin(); it != member.MemberEnd(); ++it)
+    {
+        const std::string key = it->name.GetString();
+        if(key != "dns_internal" && key != "internal_domains" && key != "direct_cidr")
+        {
+            error = "unknown singbox_options key '" + key + "'";
+            return false;
+        }
+        if(!it->value.IsString())
+        {
+            error = "singbox_options." + key + " must be a string";
+            return false;
+        }
+    }
+    if(member.HasMember("dns_internal"))
+    {
+        options.dns_internal = trim(member["dns_internal"].GetString());
+        if(!options.dns_internal.empty() && !isIPv4(options.dns_internal) && !isIPv6(options.dns_internal))
+        {
+            error = "singbox_options.dns_internal must be an IP address";
+            return false;
+        }
+    }
+    if(member.HasMember("internal_domains"))
+    {
+        if(!parse_option_list(member["internal_domains"].GetString(), 32, true, "singbox_options.internal_domains", options.internal_domains, error))
+            return false;
+        for(const std::string &item : split(options.internal_domains, ","))
+        {
+            if(!valid_domain_suffix(item))
+            {
+                error = "singbox_options.internal_domains contains an invalid domain '" + item + "'";
+                return false;
+            }
+        }
+    }
+    if(member.HasMember("direct_cidr"))
+    {
+        if(!parse_option_list(member["direct_cidr"].GetString(), 32, false, "singbox_options.direct_cidr", options.direct_cidr, error))
+            return false;
+        for(const std::string &item : split(options.direct_cidr, ","))
+        {
+            if(!valid_cidr(item))
+            {
+                error = "singbox_options.direct_cidr contains an invalid CIDR '" + item + "'";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool parse_shortlink_request(const std::string &body, string_array &links, std::string &target, std::string &platform, int &ttl, std::string &name, SingBoxLinkOptions &options, std::string &error)
 {
     if(body.size() > config.max_input_bytes)
     {
@@ -392,6 +560,13 @@ bool parse_shortlink_request(const std::string &body, string_array &links, std::
         error = "only clash and singbox targets are supported";
         return false;
     }
+    if(target != "singbox" && document.HasMember("singbox_options"))
+    {
+        error = "singbox_options only applies to the singbox target";
+        return false;
+    }
+    if(!parse_singbox_options(document, options, error))
+        return false;
     if(document.HasMember("platform") && document["platform"].IsString())
         platform = toLower(trim(document["platform"].GetString()));
     if(target == "singbox")
@@ -466,7 +641,7 @@ bool parse_shortlink_request(const std::string &body, string_array &links, std::
     return true;
 }
 
-std::string conversion_snapshot(const string_array &links, const std::string &target, const std::string &platform, Response &conversion_response)
+std::string conversion_snapshot(const string_array &links, const std::string &target, const std::string &platform, const SingBoxLinkOptions &options, Response &conversion_response)
 {
     Request conversion_request;
     conversion_request.method = "GET";
@@ -480,6 +655,17 @@ std::string conversion_snapshot(const string_array &links, const std::string &ta
             conversion_request.argument.emplace("singbox_default", config.singbox_default);
         if(!config.singbox_auto_include.empty())
             conversion_request.argument.emplace("singbox_auto_include", config.singbox_auto_include);
+        // Per-link options win over the deployment defaults, field by field.
+        // The three argument names are the whitelist this service forwards.
+        const std::string &dns_internal = !options.dns_internal.empty() ? options.dns_internal : config.singbox_dns_internal;
+        const std::string &domains = !options.internal_domains.empty() ? options.internal_domains : config.singbox_internal_domains;
+        const std::string &cidr = !options.direct_cidr.empty() ? options.direct_cidr : config.singbox_direct_cidr;
+        if(!dns_internal.empty())
+            conversion_request.argument.emplace("singbox_dns_internal", dns_internal);
+        if(!domains.empty())
+            conversion_request.argument.emplace("singbox_internal_domains", domains);
+        if(!cidr.empty())
+            conversion_request.argument.emplace("singbox_direct_cidr", cidr);
     }
     else
     {
@@ -601,6 +787,39 @@ bool initializeShortLinkService()
     // in this repository or in a client-supplied query string.
     config.singbox_default = trim(getEnv("SHORTLINK_SINGBOX_DEFAULT"));
     config.singbox_auto_include = trim(getEnv("SHORTLINK_SINGBOX_AUTO_INCLUDE"));
+    // Intranet defaults for sing-box snapshots. A malformed value is dropped
+    // with a warning instead of poisoning every generated snapshot; the same
+    // validators guard the per-link options handed in through the portal.
+    config.singbox_dns_internal = trim(getEnv("SHORTLINK_SINGBOX_DNS_INTERNAL"));
+    if(!config.singbox_dns_internal.empty() && !isIPv4(config.singbox_dns_internal) && !isIPv6(config.singbox_dns_internal))
+    {
+        writeLog(0, "Ignoring non-IP SHORTLINK_SINGBOX_DNS_INTERNAL; intranet resolver disabled.", LOG_LEVEL_WARNING);
+        config.singbox_dns_internal.clear();
+    }
+    config.singbox_internal_domains = trim(getEnv("SHORTLINK_SINGBOX_INTERNAL_DOMAINS"));
+    if(!config.singbox_internal_domains.empty())
+    {
+        bool valid = true;
+        for(const std::string &item : split(config.singbox_internal_domains, ","))
+            valid = valid && valid_domain_suffix(toLower(trim(item)));
+        if(!valid)
+        {
+            writeLog(0, "Ignoring malformed SHORTLINK_SINGBOX_INTERNAL_DOMAINS entry; intranet domains disabled.", LOG_LEVEL_WARNING);
+            config.singbox_internal_domains.clear();
+        }
+    }
+    config.singbox_direct_cidr = trim(getEnv("SHORTLINK_SINGBOX_DIRECT_CIDR"));
+    if(!config.singbox_direct_cidr.empty())
+    {
+        bool valid = true;
+        for(const std::string &item : split(config.singbox_direct_cidr, ","))
+            valid = valid && valid_cidr(trim(item));
+        if(!valid)
+        {
+            writeLog(0, "Ignoring malformed SHORTLINK_SINGBOX_DIRECT_CIDR entry; direct CIDRs disabled.", LOG_LEVEL_WARNING);
+            config.singbox_direct_cidr.clear();
+        }
+    }
     configure_shortlink_clash_profile();
     if(config.connection_string.empty() || config.encryption_key.empty())
     {
@@ -645,11 +864,12 @@ std::string createShortLink(RESPONSE_CALLBACK_ARGS)
 
     string_array links;
     std::string target, platform, name, error;
+    SingBoxLinkOptions options;
     int ttl = config.default_ttl;
-    if(!parse_shortlink_request(request.postdata, links, target, platform, ttl, name, error))
+    if(!parse_shortlink_request(request.postdata, links, target, platform, ttl, name, options, error))
         return json_error(response, error == "request body is too large" ? 413 : 400, error);
     Response conversion_response;
-    const std::string snapshot = conversion_snapshot(links, target, platform, conversion_response);
+    const std::string snapshot = conversion_snapshot(links, target, platform, options, conversion_response);
     if(snapshot.size() > config.max_output_bytes)
         return json_error(response, 413, "generated configuration is too large");
     if(lite_snapshot_too_large(snapshot, target))
@@ -661,7 +881,7 @@ std::string createShortLink(RESPONSE_CALLBACK_ARGS)
     }
 
     std::string source_payload, snapshot_payload;
-    if(!secret_box.encrypt(build_source_payload(links, target, platform), source_payload) || !secret_box.encrypt(snapshot, snapshot_payload))
+    if(!secret_box.encrypt(build_source_payload(links, target, platform, options), source_payload) || !secret_box.encrypt(snapshot, snapshot_payload))
         return json_error(response, 500, "unable to encrypt short-link payload");
 
     ShortLinkRecord record;
@@ -794,10 +1014,24 @@ std::string refreshShortLink(RESPONSE_CALLBACK_ARGS)
     }
     if(links.empty())
         return json_error(response, 500, "short-link source has no links");
+    // Restore the per-link sing-box options stored at create time. Only known
+    // keys are read; the payload is our own encrypted data, so anything else is
+    // ignored rather than rejected.
+    SingBoxLinkOptions options;
+    if(source.HasMember("options") && source["options"].IsObject())
+    {
+        const rapidjson::Value &stored = source["options"];
+        if(stored.HasMember("dns_internal") && stored["dns_internal"].IsString())
+            options.dns_internal = stored["dns_internal"].GetString();
+        if(stored.HasMember("internal_domains") && stored["internal_domains"].IsString())
+            options.internal_domains = stored["internal_domains"].GetString();
+        if(stored.HasMember("direct_cidr") && stored["direct_cidr"].IsString())
+            options.direct_cidr = stored["direct_cidr"].GetString();
+    }
     const std::string refresh_target = record.target.empty() ? "clash" : record.target;
     const std::string refresh_platform = record.platform.empty() ? config.singbox_platform : record.platform;
     Response conversion_response;
-    const std::string snapshot = conversion_snapshot(links, refresh_target, refresh_platform, conversion_response);
+    const std::string snapshot = conversion_snapshot(links, refresh_target, refresh_platform, options, conversion_response);
     if(snapshot.size() > config.max_output_bytes)
         return json_error(response, 413, "generated configuration is too large");
     if(lite_snapshot_too_large(snapshot, refresh_target))

@@ -1505,6 +1505,28 @@ http://127.0.0.1:25500/getruleset?type=%TYPE%&url=%URL%&group=%GROUP%
 
 这两个环境变量也是配置回滚开关。若要让**新建或刷新**的短链临时使用旧的展开式链式配置，可设置 `SHORTLINK_CLASH_CONFIG=config/default_clash_chainproxy.ini` 和 `SHORTLINK_CLASH_EXPAND=true` 后重启服务；恢复 Lite 值并重启即可重新启用 Lite。读取已有快照不会重新转换，因此历史快照（包括 Lite 上线前的旧快照）会原样兼容下载。只有显式调用 `POST /api/short-links/<id>/refresh` 时，才会从该短链加密保存的原始来源，按**刷新当时**的 Lite/回滚设置重新计算并写入该短链；刷新 A 不会隐式改变依赖 A 的短链 B。
 
+### sing-box 内网参数（内网 DNS 与直连网段）
+
+公司内网专属域名（如内部 API 网关）公网 DNS 解析不了，且即使解析成功，这些流量默认也会走代理出站，而远端节点同样进不了内网。为此 sing-box 短链支持一组可选的内网参数，取值优先级为：**短链自身选项 > 部署级环境变量 > 不生成**。
+
+**部署级环境变量**（写入 `.env` 并在 compose 的 `environment` 中透传，重启服务生效；值需按内网实际情况填写，此处为占位示例）：
+
+| 环境变量 | 说明 | 示例 |
+| --- | --- | --- |
+| `SHORTLINK_SINGBOX_DNS_INTERNAL` | 内网 DNS 服务器，必须是裸 IP（v4/v6）。生成的 DNS 上游恒直连（新格式 server 无 `detour` 不经过 route.rules），不会被代理 | `192.0.2.53` |
+| `SHORTLINK_SINGBOX_INTERNAL_DOMAINS` | 走内网 DNS 的域名后缀，逗号分隔，≤32 条；生成的规则排在 geosite-cn 之前 | `a.internal.example.com,b.internal.example.org` |
+| `SHORTLINK_SINGBOX_DIRECT_CIDR` | 强制直连的目标网段（CIDR），逗号分隔，≤32 条；覆盖 `ip_is_private` 命不中的公司自有公网形态 IDC 段 | `198.51.100.0/24,203.0.113.0/24` |
+
+三项相互独立：只配 DNS 不配域名等于什么都不做；域名后缀也可只配域名不配 DNS（此时仅生成流量直连规则，DNS 不变）。非法值（非 IP、非法域名、非法 CIDR）会在启动日志中告警并整体丢弃，不会静默使用。
+
+**页面填写**：Web UI"高级转换配置"里选择目标格式 sing-box 后，会出现三个可选字段（`POST /api/short-links` 的 JSON 里对应 `singbox_options` 对象，字段同名）：
+
+- **内网 DNS 服务器**：填内网 resolver 的裸 IP；
+- **内网域名后缀**：逗号分隔，如 `a.internal.example.com,b.internal.example.org`，命中后缀的域名解析将交给内网 DNS；
+- **内网直连网段**：逗号分隔 CIDR，如 `198.51.100.0/24`，命中网段的连接强制直连。
+
+页面留空表示使用服务端默认（即上表环境变量）；单条短链填了哪个字段就覆盖哪个字段。所有字段经服务端严格校验（IP / 域名后缀 / CIDR 格式，未知字段直接 400），选项随短链加密保存，刷新时按原选项重新转换。旧短链没有这些选项，自动落到环境变量默认值，无需迁移。
+
 管理员通过 API_TOKEN 或 SHORTLINK_ADMIN_SUBJECTS（Cloudflare Access 邮箱/subject 白名单）识别。管理员可以查看、刷新、撤销和删除所有用户的短链，并通过 /api/admin/users 管理用户角色；普通用户只能管理自己的短链。普通用户也可以创建永久短链，但仍受有效数量和限流配额约束。
 
 生产部署请使用独立 PostgreSQL database/role，设置 api_mode=true，并为 /、/api/ 配置登录和限流；/s/ 与原有 /sub 需要保持客户端可访问但禁止缓存。详细接口、数据模型和部署步骤见 docs/short-link-postgresql-plan.md。

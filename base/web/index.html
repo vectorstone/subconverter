@@ -87,6 +87,20 @@
                         <span>节点名称添加 Emoji 国旗</span>
                     </label>
                 </div>
+                <div id="singbox-options" class="advanced-grid hidden">
+                    <div>
+                        <label for="singbox-dns-internal">内网 DNS 服务器（可选，仅 sing-box）</label>
+                        <input id="singbox-dns-internal" placeholder="例如 198.51.100.53，留空使用服务端默认">
+                    </div>
+                    <div>
+                        <label for="singbox-internal-domains">内网域名后缀（可选，逗号分隔）</label>
+                        <input id="singbox-internal-domains" placeholder="例如 a.internal.example.com,b.internal.example.org">
+                    </div>
+                    <div>
+                        <label for="singbox-direct-cidr">内网直连网段（可选，逗号分隔 CIDR）</label>
+                        <input id="singbox-direct-cidr" placeholder="例如 198.51.100.0/24,203.0.113.0/24">
+                    </div>
+                </div>
             </details>
         </form>
         <p id="message" class="message" role="status"></p>
@@ -150,6 +164,6 @@
     </section>
 </main>
 <script src="/qrcode.min.js" defer></script>
-<script src="/app.js?v=20260920-1" defer></script>
+<script src="/app.js?v=20260920-2" defer></script>
 </body>
 </html>

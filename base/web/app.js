@@ -40,6 +40,10 @@
     const excludeRemarksInput = $('#exclude-remarks');
     const cleanInfoNodesInput = $('#clean-info-nodes');
     const addEmojiInput = $('#add-emoji');
+    const singboxOptionsSection = $('#singbox-options');
+    const singboxDnsInternalInput = $('#singbox-dns-internal');
+    const singboxInternalDomainsInput = $('#singbox-internal-domains');
+    const singboxDirectCidrInput = $('#singbox-direct-cidr');
 
     const qrModal = $('#qr-modal');
     const qrContainer = $('#qr-container');
@@ -104,6 +108,7 @@
         if (!platformInput) return;
         const singbox = currentTarget() === 'singbox';
         platformInput.disabled = !singbox;
+        if (singboxOptionsSection) singboxOptionsSection.classList.toggle('hidden', !singbox);
         if (downloadLink) {
             downloadLink.download = singbox ? 'config.json' : 'config.yaml';
             if (!downloadLink.classList.contains('disabled'))
@@ -730,6 +735,13 @@
         const finalLinks = processedLinks.length ? processedLinks : links;
         setMessage('正在转换并保存短链……', false);
         resultCard.classList.add('hidden');
+        // sing-box personalization: empty fields mean "use the server default",
+        // the backend validates each field and rejects unknown keys.
+        const singbox_options = {
+            dns_internal: singboxDnsInternalInput ? singboxDnsInternalInput.value.trim() : '',
+            internal_domains: singboxInternalDomainsInput ? singboxInternalDomainsInput.value.trim() : '',
+            direct_cidr: singboxDirectCidrInput ? singboxDirectCidrInput.value.trim() : ''
+        };
         try {
             const response = await fetch('/api/short-links', {
                 method: 'POST',
@@ -739,7 +751,8 @@
                     target: currentTarget(),
                     platform: currentTarget() === 'singbox' ? currentPlatform() : '',
                     expires_in: Number(expiresInput.value),
-                    links: finalLinks
+                    links: finalLinks,
+                    singbox_options: currentTarget() === 'singbox' ? singbox_options : undefined
                 })
             });
             const data = await response.json().catch(() => ({}));

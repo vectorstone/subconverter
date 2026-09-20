@@ -118,6 +118,57 @@ grep -Eiq 'Content-Type: application/json' <<<"${sb_headers}"
 curl -fsS --max-time 30 -X POST --data-binary "" "${AUTH_ARGS[@]}" "${BASE_URL}/api/short-links/${sb_id}/refresh" | grep -q refreshed
 curl -fsS --max-time 10 -X DELETE "${AUTH_ARGS[@]}" "${BASE_URL}/api/short-links/${sb_id}" | grep -q revoked
 
+# --------------------------------------------- sing-box intranet options
+# Documentation-only values (RFC 5737 / example.com). Per-link options ride in
+# the create request, ride along in the encrypted payload, and must survive a
+# refresh; unknown keys and malformed values are rejected.
+intranet_payload='{"name":"smoke-singbox-intranet","target":"singbox","platform":"macos","expires_in":3600,"links":["ss://YWVzLTEyOC1nY206Zml4dHVyZQ==@198.51.100.10:443#smoke"],"singbox_options":{"dns_internal":"192.0.2.53","internal_domains":"a.internal.example.com, b.internal.example.org,A.INTERNAL.EXAMPLE.COM","direct_cidr":"198.51.100.0/24, 203.0.113.0/24"}}'
+intranet_response=$(curl -fsS --max-time 30 -X POST -H 'Content-Type: application/json' "${AUTH_ARGS[@]}" --data-binary "${intranet_payload}" "${BASE_URL}/api/short-links")
+intranet_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${intranet_response}")
+intranet_url=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["short_url"])' <<<"${intranet_response}")
+
+intranet_snapshot_file=$(mktemp)
+curl -fsS --max-time 20 -o "${intranet_snapshot_file}" "${intranet_url}"
+python3 - "${intranet_snapshot_file}" <<'PY_INTRANET'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1]))
+server = next(s for s in doc["dns"]["servers"] if s.get("tag") == "dns-internal")
+assert server["server"] == "192.0.2.53" and server["type"] == "udp", server
+assert "detour" not in server, server
+dns_rules = doc["dns"]["rules"]
+internal_rule = next(r for r in dns_rules if r.get("server") == "dns-internal")
+# Dedupe is case-insensitive; the suffixes arrive canonicalized.
+assert internal_rule["domain_suffix"] == ["a.internal.example.com", "b.internal.example.org"], internal_rule
+route_rules = doc["route"]["rules"]
+cidr_rule = next(r for r in route_rules if "198.51.100.0/24" in r.get("ip_cidr", []))
+assert cidr_rule["ip_cidr"] == ["198.51.100.0/24", "203.0.113.0/24"] and cidr_rule["outbound"] == "DIRECT", cidr_rule
+PY_INTRANET
+rm -f "${intranet_snapshot_file}"
+
+# The options are persisted, so a refresh reproduces the same conversion.
+curl -fsS --max-time 30 -X POST --data-binary "" "${AUTH_ARGS[@]}" "${BASE_URL}/api/short-links/${intranet_id}/refresh" | grep -q refreshed
+curl -fsS --max-time 20 -o "${intranet_snapshot_file}" "${intranet_url}"
+grep -q '"server": "192.0.2.53"' "${intranet_snapshot_file}" || grep -q '"server":"192.0.2.53"' "${intranet_snapshot_file}"
+rm -f "${intranet_snapshot_file}"
+curl -fsS --max-time 10 -X DELETE "${AUTH_ARGS[@]}" "${BASE_URL}/api/short-links/${intranet_id}" | grep -q revoked
+
+# Rejections: unknown key, malformed IP, clash target with options, bad CIDR.
+for reject_payload in \
+    '{"target":"singbox","links":["ss://YWVzLTEyOC1nY206Zml4dHVyZQ==@198.51.100.10:443#smoke"],"singbox_options":{"config":"evil"}}' \
+    '{"target":"singbox","links":["ss://YWVzLTEyOC1nY206Zml4dHVyZQ==@198.51.100.10:443#smoke"],"singbox_options":{"dns_internal":"not-an-ip"}}' \
+    '{"target":"clash","links":["ss://YWVzLTEyOC1nY206Zml4dHVyZQ==@198.51.100.10:443#smoke"],"singbox_options":{"direct_cidr":"198.51.100.0/24"}}' \
+    '{"target":"singbox","links":["ss://YWVzLTEyOC1nY206Zml4dHVyZQ==@198.51.100.10:443#smoke"],"singbox_options":{"direct_cidr":"198.51.100.0/99"}}' \
+    '{"target":"singbox","links":["ss://YWVzLTEyOC1nY206Zml4dHVyZQ==@198.51.100.10:443#smoke"],"singbox_options":{"internal_domains":"-bad.example.com"}}'
+do
+    reject_code=$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' \
+        -X POST -H 'Content-Type: application/json' "${AUTH_ARGS[@]}" \
+        --data-binary "${reject_payload}" "${BASE_URL}/api/short-links")
+    [[ "${reject_code}" == "400" ]] || { echo "shortlink-smoke-failed: expected 400 for ${reject_payload}, got ${reject_code}" >&2; exit 1; }
+done
+echo 'ok: sing-box intranet options accepted, persisted, refreshed, and rejected when malformed'
+
 # ------------------------------------------------ large sing-box regression
 # The Clash Lite size limit must not be applied to sing-box snapshots. A
 # sing-box snapshot is generated from the local preference rulesets rather than
