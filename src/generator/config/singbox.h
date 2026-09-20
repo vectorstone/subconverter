@@ -112,6 +112,17 @@ struct Settings
     std::string dns_direct_server = "223.5.5.5";
     std::string dns_proxy_server = "1.1.1.1";
     std::string dns_direct_ruleset = "geosite-cn";
+    /// Upstream DNS server for intranet-only domains (bare IP, dialed directly:
+    /// a new-format server without `detour` uses an empty direct outbound, never
+    /// route rules or route.final). Empty disables all intranet handling.
+    std::string dns_internal_server;
+    /// Comma separated domain suffixes answered by `dns_internal_server`.
+    /// Ignored unless that server is set; both are required on purpose.
+    std::string dns_internal_domains;
+    /// Comma separated destination CIDRs forced onto the direct outbound.
+    /// Covers intranet services that live on public-looking (company-owned)
+    /// ranges, which `ip_is_private` never matches.
+    std::string direct_cidr;
     std::string direct_tag = "DIRECT";
     std::string reject_tag = "REJECT";
     std::string proxy_tag = "proxy";

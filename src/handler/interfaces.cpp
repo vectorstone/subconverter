@@ -554,6 +554,15 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
             sb.dns_direct_ruleset = sbArg;
         else if(getUrlArg(argument, "singbox_dns_split") == "0")
             sb.dns_direct_ruleset.clear();
+        /// Intranet resolver for domains the public DNS cannot answer, plus the
+        /// destination CIDRs / domain suffixes that must stay off the proxy.
+        /// Both DNS settings are required together; the CIDR list stands alone.
+        if(!(sbArg = getUrlArg(argument, "singbox_dns_internal")).empty())
+            sb.dns_internal_server = sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_internal_domains")).empty())
+            sb.dns_internal_domains = sbArg;
+        if(!(sbArg = getUrlArg(argument, "singbox_direct_cidr")).empty())
+            sb.direct_cidr = sbArg;
         if(!(sbArg = getUrlArg(argument, "singbox_ruleset_dir")).empty())
             sb.local_ruleset_dir = sbArg;
         if(!(sbArg = getUrlArg(argument, "singbox_cache_path")).empty())

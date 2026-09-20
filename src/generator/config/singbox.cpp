@@ -48,6 +48,24 @@ Value makeArray(const std::vector<std::string> &values, Document::AllocatorType 
     return result;
 }
 
+/**
+ * Split a comma separated setting into trimmed, non-empty, de-duplicated items.
+ * Duplicate detection is case-insensitive because domain suffixes and CIDRs
+ * carry no case distinction that could make two spellings intentional.
+ */
+std::vector<std::string> splitList(const std::string &raw)
+{
+    std::vector<std::string> result;
+    std::set<std::string> seen;
+    for(std::string item : split(raw, ","))
+    {
+        trim(item);
+        if(!item.empty() && seen.insert(toLower(item)).second)
+            result.push_back(item);
+    }
+    return result;
+}
+
 void addSpec(std::vector<RuleSetSpec> &specs, const std::string &tag)
 {
     if(tag.empty())
@@ -478,6 +496,18 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
         proxy_backup.AddMember("domain_resolver", makeString("dns-hosts", allocator), allocator);
         servers.PushBack(proxy_backup, allocator);
 
+        // Intranet-only resolver. The server must be a bare IP: a new-format
+        // server without `detour` dials through an empty direct outbound, so the
+        // query escapes the tunnel even though route.final is the proxy group.
+        if(!settings.dns_internal_server.empty())
+        {
+            Value internal(kObjectType);
+            internal.AddMember("type", makeString("udp", allocator), allocator);
+            internal.AddMember("tag", makeString("dns-internal", allocator), allocator);
+            internal.AddMember("server", makeString(settings.dns_internal_server, allocator), allocator);
+            servers.PushBack(internal, allocator);
+        }
+
         Value rules(kArrayType);
 
         // Drop SVCB / HTTPS queries to prevent leaking or hangs.
@@ -486,6 +516,19 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
             reject_https.AddMember("query_type", makeArray({"HTTPS"}, allocator), allocator);
             reject_https.AddMember("action", makeString("reject", allocator), allocator);
             rules.PushBack(reject_https, allocator);
+        }
+
+        // Intranet-only domains must be answered by the internal resolver: the
+        // public servers (dns-direct / dns-proxy) cannot see those names at all.
+        // dns.rules are first-match and the geosite-cn rule below already
+        // matches company suffixes, so this has to sit before it.
+        if(!settings.dns_internal_server.empty() && !settings.dns_internal_domains.empty())
+        {
+            Value rule(kObjectType);
+            rule.AddMember("domain_suffix", makeArray(splitList(settings.dns_internal_domains), allocator), allocator);
+            rule.AddMember("action", makeString("route", allocator), allocator);
+            rule.AddMember("server", makeString("dns-internal", allocator), allocator);
+            rules.PushBack(rule, allocator);
         }
 
         if(!settings.dns_direct_ruleset.empty())
@@ -625,6 +668,34 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
             rule.AddMember("action", makeString("route", allocator), allocator);
             rule.AddMember("outbound", makeString(settings.direct_tag, allocator), allocator);
             rules.PushBack(rule, allocator);
+        }
+        // Intranet destinations live on company-owned public-looking ranges and
+        // resolve through the internal DNS, so neither `ip_is_private` nor a
+        // bundled rule set takes them off route.final (the proxy group), and the
+        // remote node cannot reach them either. The domain rule keeps SNI/Host
+        // traffic direct even when addresses drift; the CIDR rule covers
+        // plain-IP access without a sniffable domain. Both must precede the
+        // clash-mode rules below or Global mode would override them.
+        if(!settings.dns_internal_domains.empty() || !settings.direct_cidr.empty())
+        {
+            std::vector<std::string> domains = splitList(settings.dns_internal_domains);
+            if(!domains.empty())
+            {
+                Value rule(kObjectType);
+                rule.AddMember("domain_suffix", makeArray(domains, allocator), allocator);
+                rule.AddMember("action", makeString("route", allocator), allocator);
+                rule.AddMember("outbound", makeString(settings.direct_tag, allocator), allocator);
+                rules.PushBack(rule, allocator);
+            }
+            std::vector<std::string> cidrs = splitList(settings.direct_cidr);
+            if(!cidrs.empty())
+            {
+                Value rule(kObjectType);
+                rule.AddMember("ip_cidr", makeArray(cidrs, allocator), allocator);
+                rule.AddMember("action", makeString("route", allocator), allocator);
+                rule.AddMember("outbound", makeString(settings.direct_tag, allocator), allocator);
+                rules.PushBack(rule, allocator);
+            }
         }
         if(profile.clash_mode_rules && settings.clash_modes)
         {

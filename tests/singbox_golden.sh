@@ -487,6 +487,77 @@ grep -q "singbox_auto_include matched no node" "$WORK/converter.log" \
     || fail "an unmatched singbox_auto_include did not warn"
 pass "selector default resolves against members; urltest member set narrows by keyword"
 
+echo "== intranet DNS resolver and direct CIDR knobs"
+# Documentation-only values: RFC 5737 / example.com. The real deployment hands
+# in its own intranet resolver and company suffixes as request arguments.
+curl -s -o "$WORK/intranet.json" \
+    "http://127.0.0.1:$PORT/sub?target=singbox&singbox_platform=macos&singbox_dns_internal=192.0.2.53&singbox_internal_domains=example.com%2Cexample.org&singbox_direct_cidr=198.51.100.0%2F24%2C203.0.113.0%2F24&url=http%3A%2F%2F127.0.0.1%3A$FIXTURE_PORT%2Fsubscription.yaml"
+if [[ -n "$SINGBOX_BIN" ]]; then
+    "$SINGBOX_BIN" check -c "$WORK/intranet.json" >"$WORK/intranet.check.log" 2>&1 \
+        || { cat "$WORK/intranet.check.log" >&2; fail "intranet: sing-box check failed"; }
+    pass "intranet passed sing-box check"
+fi
+python3 - "$WORK" <<'PY'
+import json, sys, pathlib
+
+work = pathlib.Path(sys.argv[1])
+failures = []
+base = json.loads((work / "macos.json").read_text())
+doc = json.loads((work / "intranet.json").read_text())
+
+server = next((s for s in doc["dns"]["servers"] if s.get("tag") == "dns-internal"), None)
+if server is None:
+    failures.append("intranet: dns.servers has no dns-internal entry")
+elif server.get("server") != "192.0.2.53" or server.get("type") != "udp":
+    failures.append(f"intranet: dns-internal misconfigured: {server}")
+elif "detour" in server:
+    # A new-format server without detour dials directly; routing the intranet
+    # resolver through route rules or the proxy group would break it.
+    failures.append("intranet: dns-internal must dial directly (no detour)")
+
+# The internal resolver rule must sit before the geosite rule: dns.rules are
+# first-match and the company suffixes are inside geosite-cn.
+dns_rules = doc["dns"]["rules"]
+internal_rule = next((r for r in dns_rules if r.get("server") == "dns-internal"), None)
+if internal_rule is None:
+    failures.append("intranet: dns.rules has no dns-internal route")
+elif set(internal_rule.get("domain_suffix", [])) != {"example.com", "example.org"}:
+    failures.append(f"intranet: dns-internal suffixes wrong: {internal_rule}")
+else:
+    def dns_index(pred):
+        return next((i for i, r in enumerate(dns_rules) if pred(r)), len(dns_rules))
+    if dns_index(lambda r: r.get("server") == "dns-internal") > dns_index(lambda r: "rule_set" in r):
+        failures.append("intranet: the dns-internal rule must precede the geosite-cn rule")
+
+# The direct rules must sit after ip_is_private but before the clash-mode rules:
+# in Global mode a later clash_mode rule would take the intranet traffic.
+route_rules = doc["route"]["rules"]
+def route_index(pred):
+    return next((i for i, r in enumerate(route_rules) if pred(r)), len(route_rules))
+private_idx = route_index(lambda r: r.get("ip_is_private"))
+domain_idx = route_index(lambda r: "example.com" in r.get("domain_suffix", []))
+cidr_idx = route_index(lambda r: "198.51.100.0/24" in r.get("ip_cidr", []))
+global_idx = route_index(lambda r: r.get("clash_mode") == "Global")
+for name, idx in (("domain_suffix direct", domain_idx), ("ip_cidr direct", cidr_idx)):
+    if idx >= len(route_rules):
+        failures.append(f"intranet: the {name} rule is missing")
+    elif not (private_idx < idx < global_idx):
+        failures.append(f"intranet: the {name} rule (index {idx}) must follow ip_is_private "
+                        f"({private_idx}) and precede clash_mode Global ({global_idx})")
+
+# Without the arguments nothing of this may be emitted.
+if any(s.get("tag") == "dns-internal" for s in base["dns"]["servers"]):
+    failures.append("base: dns-internal must not be emitted without singbox_dns_internal")
+if any("198.51.100.0/24" in r.get("ip_cidr", []) for r in base["route"]["rules"]):
+    failures.append("base: the requested CIDR must not be emitted without singbox_direct_cidr")
+
+if failures:
+    for line in failures:
+        print("  FAIL " + line)
+    sys.exit(1)
+PY
+pass "intranet resolver routes before geosite-cn; direct rules sit inside the private..clash window"
+
 code=$(curl -s -o "$WORK/strict.txt" -w '%{http_code}' \
     "http://127.0.0.1:$PORT/sub?target=singbox&singbox_platform=macos&singbox_chain_strict=1&url=http%3A%2F%2F127.0.0.1%3A$FIXTURE_PORT%2Fchain.yaml")
 [[ "$code" == "400" ]] || fail "strict chain mode returned HTTP $code"

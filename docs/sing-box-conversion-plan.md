@@ -428,6 +428,7 @@ Clash `fallback`/`load-balance` 组：sing-box 无对应类型，统一降级为
 > - M1 ~ M4 已完成：`src/generator/config/singbox.{h,cpp}` 新增平台 profile、1.14 骨架生成、rule_set 生成、链式依赖图校验与结构自检；`subexport.cpp` 的 sing-box 分支重写（含 B1~B7 修复）；`ruleconvert.cpp` 规则改写（geosite/geoip → rule_set、保留大小写、action 语法、FINAL 处理）。
 > - 验证：`tests/singbox_golden.sh` 全绿 —— macos/windows/linux 在本机 `sing-box 1.14.0` 通过 `check`；openwrt 产物在网关内核 `1.14.0-openbox-tcp1` 通过 `check`；android/ios 因平台专属字段无法在本机解码，改用结构断言校验。
 > - 新增 URL 参数：`singbox_platform`（别名 `platform`）、`singbox_ipv6`、`singbox_dns_direct`、`singbox_dns_proxy`、`singbox_dns_ruleset`、`singbox_dns_split`、`singbox_ruleset_source=local|remote`、`singbox_ruleset_dir`、`singbox_cache_path`、`singbox_clash_api`、`singbox_clash_api_secret`、`singbox_chain_strict`。
+> - 内网解析参数（后加，全部缺省关闭）：`singbox_dns_internal`（内网 DNS 服务器裸 IP，新格式 udp server 无 `detour` 恒直连，不经 route.rules）、`singbox_internal_domains`（逗号分隔域名后缀；与上者必须成对给，生成的 dns 规则置于 geosite-cn 之前）、`singbox_direct_cidr`（逗号分隔目标网段，生成 route 直连规则，覆盖 `ip_is_private` 命不中的公司自有公网形态 IDC 段；直连规则位于 ip_is_private 之后、clash_mode 规则之前，避免 Global 模式接管）。
 > - 新增 pref 键：`singbox_default_platform`（默认 `macos`）、`singbox_chain_strict`（默认 `false`）。
 > - 模板路径保留：仅当外部配置显式提供 `singbox_rule_base` 时才回退到 `render_template`，否则一律走 C++ 生成（`ext.singbox_generated`）。
 
