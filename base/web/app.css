@@ -82,7 +82,21 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .binding-row-detail { margin: 6px 0 0; color: #708099; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .binding-actions { display: flex; gap: 8px; align-items: center; }
 .binding-actions input { width: 180px; }
-@media (max-width: 860px) { .binding-form { grid-template-columns: 1fr 1fr; } .binding-form-action { grid-column: 1 / -1; } }
+.advanced-section { margin-top: 18px; padding: 14px 16px; border: 1px dashed #cfd9e8; border-radius: 12px; background: #fafcff; }
+.advanced-section summary { cursor: pointer; color: #3f6fd9; font-size: 13px; font-weight: 700; user-select: none; }
+.advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
+.advanced-toggles { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.toggle-item { display: inline-flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; color: #2e3e55; font-size: 13px; font-weight: 500; }
+.toggle-item input[type="checkbox"] { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(16, 24, 39, .45); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 999; padding: 20px; }
+.modal-overlay.hidden { display: none; }
+.modal-card { width: min(380px, 100%); background: #fff; border-radius: 18px; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,.18); text-align: center; }
+.modal-card .section-title { align-items: center; margin-bottom: 16px; }
+.modal-card h3 { margin: 0; font-size: 18px; color: #162033; }
+.qr-container { display: flex; justify-content: center; align-items: center; min-height: 200px; padding: 12px; background: #fff; border: 1px solid #e7edf5; border-radius: 12px; }
+.qr-container canvas { max-width: 100%; height: auto; }
+.qr-url-text { margin-top: 14px; font-size: 12px; color: #708099; word-break: break-all; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 48px; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 860px) { .binding-form { grid-template-columns: 1fr 1fr; } .binding-form-action { grid-column: 1 / -1; } .advanced-grid { grid-template-columns: 1fr; } }
 @media (max-width: 700px) {
     .page { padding: 32px 16px 60px; }
     .form-row, .link-row { align-items: stretch; flex-direction: column; }

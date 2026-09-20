@@ -65,17 +65,52 @@
                     <button type="button" id="clear-button" class="secondary">清空</button>
                 </div>
             </div>
+            <details class="advanced-section">
+                <summary>高级转换配置（节点筛选、清洗与格式化）</summary>
+                <div class="advanced-grid">
+                    <div>
+                        <label for="include-remarks">保留节点（正则或关键字）</label>
+                        <input id="include-remarks" name="include_remarks" placeholder="例如：香港|日本|美国|专线">
+                    </div>
+                    <div>
+                        <label for="exclude-remarks">排除节点（正则或关键字）</label>
+                        <input id="exclude-remarks" name="exclude_remarks" placeholder="例如：网站|官网|群|重置">
+                    </div>
+                </div>
+                <div class="advanced-toggles">
+                    <label class="toggle-item">
+                        <input type="checkbox" id="clean-info-nodes" checked>
+                        <span>自动过滤通知/过期/剩余流量等提示节点</span>
+                    </label>
+                    <label class="toggle-item">
+                        <input type="checkbox" id="add-emoji">
+                        <span>节点名称添加 Emoji 国旗</span>
+                    </label>
+                </div>
+            </details>
         </form>
         <p id="message" class="message" role="status"></p>
     </section>
     <section id="result-card" class="card hidden">
         <div class="section-title"><h2>生成结果</h2><span id="result-meta" class="muted"></span></div>
         <label for="short-url">订阅短链</label>
-        <div class="copy-row"><input id="short-url" readonly><button type="button" id="copy-button">复制</button></div>
-        <div class="button-row"><a id="preview-link" class="button secondary" target="_blank" rel="noreferrer">打开短链</a><a id="download-link" class="button" download>下载 YAML</a></div>
+        <div class="copy-row"><input id="short-url" readonly><button type="button" id="copy-button">复制</button><button type="button" id="qr-button" class="secondary">二维码</button></div>
+        <div class="button-row">
+            <button type="button" id="import-clash-btn" class="button secondary">导入 Clash</button>
+            <button type="button" id="import-singbox-btn" class="button secondary">导入 sing-box</button>
+            <a id="preview-link" class="button secondary" target="_blank" rel="noreferrer">打开短链</a>
+            <a id="download-link" class="button" download>下载 YAML</a>
+        </div>
         <label for="preview">配置预览</label>
         <pre id="preview" class="preview"></pre>
     </section>
+    <div id="qr-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="qr-modal-title">
+        <div class="modal-card">
+            <div class="section-title"><h3 id="qr-modal-title">手机扫码导入订阅</h3><button type="button" id="qr-close-btn" class="icon-button secondary" title="关闭" aria-label="关闭">×</button></div>
+            <div id="qr-container" class="qr-container"></div>
+            <p id="qr-url-text" class="qr-url-text"></p>
+        </div>
+    </div>
     <section class="card">
         <div class="section-title"><h2>我的短链</h2><button type="button" id="refresh-button" class="secondary">刷新</button></div>
         <div id="links-list" class="links-list"><p class="muted">登录后加载。</p></div>
@@ -114,6 +149,7 @@
         </div>
     </section>
 </main>
-<script src="/app.js?v=20260915-2" defer></script>
+<script src="/qrcode.min.js" defer></script>
+<script src="/app.js?v=20260920-1" defer></script>
 </body>
 </html>

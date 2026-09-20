@@ -3051,6 +3051,8 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json, std::v
             {
                 group.AddMember("url", rapidjson::Value("https://www.gstatic.com/generate_204", allocator), allocator);
                 group.AddMember("interval", rapidjson::Value("5m", allocator), allocator);
+                group.AddMember("idle_timeout", rapidjson::Value("30m", allocator), allocator);
+                group.AddMember("interrupt_exist_connections", false, allocator);
                 group.AddMember("tolerance", 50, allocator);
             }
             group_tag_set.insert(tag);

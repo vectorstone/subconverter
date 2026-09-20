@@ -212,11 +212,16 @@ def check_platform(name):
         if "experimental" in doc and "clash_api" in doc["experimental"]:
             if doc["experimental"]["clash_api"].get("external_controller") != "127.0.0.1:9095":
                 failures.append("openwrt: clash_api must bind 127.0.0.1:9095")
-    if name in ("android", "ios"):
+    if name == "ios":
         if "experimental" in doc:
-            failures.append(f"{name}: experimental must not be emitted")
+            failures.append("ios: experimental must not be emitted")
         if doc["inbounds"][0].get("dns_mode") != "hijack":
-            failures.append(f"{name}: tun dns_mode hijack expected")
+            failures.append("ios: tun dns_mode hijack expected")
+    if name == "android":
+        if not ("experimental" in doc and "cache_file" in doc["experimental"]):
+            failures.append("android: experimental.cache_file expected")
+        if doc["inbounds"][0].get("dns_mode") != "hijack":
+            failures.append("android: tun dns_mode hijack expected")
     if name == "android" and not doc["route"].get("override_android_vpn"):
         failures.append("android: override_android_vpn expected")
     if name == "ios" and doc["route"].get("override_android_vpn"):

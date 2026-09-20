@@ -380,7 +380,7 @@ const Profile &profileOf(Platform platform)
     // returns false, so the field would merely bind physical NICs.
     static const Profile android_profile = {
         false, true, 1500, true, false, false, true, false, true,
-        false, false, false, "cache.db", false, "warn", true, "prefer_ipv4"
+        false, false, true, "cache.db", false, "warn", true, "prefer_ipv4"
     };
     static const Profile ios_profile = {
         false, true, 1500, false, false, false, true, false, false,
@@ -442,6 +442,20 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
 
     {
         Value servers(kArrayType);
+
+        // Predefined hosts resolver to break bootstrap deadlocks for DoH servers.
+        {
+            Value hosts(kObjectType);
+            hosts.AddMember("type", makeString("hosts", allocator), allocator);
+            hosts.AddMember("tag", makeString("dns-hosts", allocator), allocator);
+            Value predefined(kObjectType);
+            predefined.AddMember("cloudflare-dns.com", makeArray({"104.16.248.249", "104.16.249.249"}, allocator), allocator);
+            predefined.AddMember("dns.google", makeArray({"8.8.8.8", "8.8.4.4"}, allocator), allocator);
+            predefined.AddMember("dns.alidns.com", makeArray({"223.5.5.5", "223.6.6.6"}, allocator), allocator);
+            hosts.AddMember("predefined", predefined, allocator);
+            servers.PushBack(hosts, allocator);
+        }
+
         Value direct(kObjectType);
         direct.AddMember("type", makeString("udp", allocator), allocator);
         direct.AddMember("tag", makeString("dns-direct", allocator), allocator);
@@ -453,10 +467,27 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
         proxy.AddMember("tag", makeString("dns-proxy", allocator), allocator);
         proxy.AddMember("server", makeString(settings.dns_proxy_server, allocator), allocator);
         proxy.AddMember("detour", makeString(settings.proxy_tag, allocator), allocator);
-        proxy.AddMember("domain_resolver", makeString("dns-direct", allocator), allocator);
+        proxy.AddMember("domain_resolver", makeString("dns-hosts", allocator), allocator);
         servers.PushBack(proxy, allocator);
 
+        Value proxy_backup(kObjectType);
+        proxy_backup.AddMember("type", makeString("https", allocator), allocator);
+        proxy_backup.AddMember("tag", makeString("dns-proxy-backup", allocator), allocator);
+        proxy_backup.AddMember("server", makeString("dns.google", allocator), allocator);
+        proxy_backup.AddMember("detour", makeString(settings.proxy_tag, allocator), allocator);
+        proxy_backup.AddMember("domain_resolver", makeString("dns-hosts", allocator), allocator);
+        servers.PushBack(proxy_backup, allocator);
+
         Value rules(kArrayType);
+
+        // Drop SVCB / HTTPS queries to prevent leaking or hangs.
+        {
+            Value reject_https(kObjectType);
+            reject_https.AddMember("query_type", makeArray({"HTTPS"}, allocator), allocator);
+            reject_https.AddMember("action", makeString("reject", allocator), allocator);
+            rules.PushBack(reject_https, allocator);
+        }
+
         if(!settings.dns_direct_ruleset.empty())
         {
             Value rule(kObjectType);

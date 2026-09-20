@@ -69,7 +69,7 @@ const run = async () => {
     let adminMode = 'ok';
     let deleteHits = 0;
 
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROME_PATH || undefined });
     try {
         const page = await browser.newPage();
         page.on('dialog', (dialog) => dialog.accept());

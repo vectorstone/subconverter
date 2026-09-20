@@ -120,8 +120,8 @@ struct Settings
     bool ipv6 = false;
     std::string local_ruleset_dir = "/opt/open-box/data/rulesets";
     int ruleset_source = -1;   // -1 = platform default, 0 = remote srs, 1 = local srs
-    std::string geosite_url_prefix = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/";
-    std::string geoip_url_prefix = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/";
+    std::string geosite_url_prefix = "https://testingcf.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/";
+    std::string geoip_url_prefix = "https://testingcf.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/";
     std::string cache_path;
     /// Requested default outbound of the traffic selector. Resolved against the
     /// selector's members: a value that no longer matches one is dropped rather

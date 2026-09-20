@@ -36,6 +36,19 @@
     const bindingsList = $('#bindings-list');
     const bindingsMore = $('#bindings-more');
 
+    const includeRemarksInput = $('#include-remarks');
+    const excludeRemarksInput = $('#exclude-remarks');
+    const cleanInfoNodesInput = $('#clean-info-nodes');
+    const addEmojiInput = $('#add-emoji');
+
+    const qrModal = $('#qr-modal');
+    const qrContainer = $('#qr-container');
+    const qrUrlText = $('#qr-url-text');
+    const qrCloseBtn = $('#qr-close-btn');
+    const qrBtn = $('#qr-button');
+    const importClashBtn = $('#import-clash-btn');
+    const importSingboxBtn = $('#import-singbox-btn');
+
     let usageTimer = 0;
     let usageInFlight = false;
     let usageStopped = false;
@@ -101,6 +114,42 @@
     const copyText = async (value) => {
         await navigator.clipboard.writeText(value);
         setMessage('已复制到剪贴板。', false);
+    };
+
+    const absoluteUrl = (url) => {
+        if (!url) return '';
+        try { return new URL(url, window.location.href).href; }
+        catch (_) { return url; }
+    };
+
+    const showQrModal = (url) => {
+        if (!qrModal || !qrContainer) return;
+        const fullUrl = absoluteUrl(url);
+        qrContainer.replaceChildren();
+        qrUrlText.textContent = fullUrl;
+        if (window.QRCode) {
+            new window.QRCode(qrContainer, {
+                text: fullUrl,
+                width: 220,
+                height: 220,
+                colorDark: '#101827',
+                colorLight: '#ffffff',
+                correctLevel: window.QRCode.CorrectLevel.M
+            });
+        } else {
+            qrContainer.append(el('p', 'muted', '未能加载二维码模块'));
+        }
+        qrModal.classList.remove('hidden');
+    };
+
+    const hideQrModal = () => {
+        if (qrModal) qrModal.classList.add('hidden');
+    };
+
+    const openClientScheme = (schemeUrl, fallbackUrl) => {
+        const fullUrl = absoluteUrl(fallbackUrl);
+        window.location.href = schemeUrl;
+        setMessage('已尝试唤起客户端导入，若无反应请使用复制或扫码导入。', false);
     };
 
     const formatDate = (timestamp, emptyText = '长期有效') => {
@@ -435,6 +484,10 @@
             const actions = el('div', 'row-actions');
             const copy = el('button', 'secondary', '复制');
             copy.onclick = () => copyText(item.short_url);
+            const qr = el('button', 'secondary', '二维码');
+            qr.onclick = () => showQrModal(item.short_url);
+            actions.append(copy, qr);
+
             const download = el('a', 'button', item.target === 'singbox' ? '下载 JSON' : '下载 YAML');
             download.href = item.download_url || (item.short_url + (item.short_url.includes('?') ? '&' : '?') + 'download=1');
             download.setAttribute('download', '');
@@ -648,10 +701,47 @@
         event.preventDefault();
         const links = linksInput.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
         if (!links.length) return setMessage('至少输入一个节点或订阅链接。', true);
+
+        // Pre-filter / Clean nodes based on advanced settings
+        const includePattern = includeRemarksInput ? includeRemarksInput.value.trim() : '';
+        const excludePattern = excludeRemarksInput ? excludeRemarksInput.value.trim() : '';
+        const cleanInfo = cleanInfoNodesInput ? cleanInfoNodesInput.checked : true;
+
+        const infoRegex = /(剩余|到期|过期|重置|官网|群|Traffic|VIP|Traffic|channel|telegram)/i;
+        const includeRegex = includePattern ? new RegExp(includePattern, 'i') : null;
+        const excludeRegex = excludePattern ? new RegExp(excludePattern, 'i') : null;
+
+        const processedLinks = [];
+        for (const link of links) {
+            let tag = '';
+            const hashIdx = link.indexOf('#');
+            if (hashIdx !== -1) {
+                try { tag = decodeURIComponent(link.slice(hashIdx + 1)); }
+                catch (_) { tag = link.slice(hashIdx + 1); }
+            }
+            if (tag) {
+                if (cleanInfo && infoRegex.test(tag)) continue;
+                if (excludeRegex && excludeRegex.test(tag)) continue;
+                if (includeRegex && !includeRegex.test(tag)) continue;
+            }
+            processedLinks.push(link);
+        }
+
+        const finalLinks = processedLinks.length ? processedLinks : links;
         setMessage('正在转换并保存短链……', false);
         resultCard.classList.add('hidden');
         try {
-            const response = await fetch('/api/short-links', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()), body: JSON.stringify({ name: nameInput.value.trim(), target: currentTarget(), platform: currentTarget() === 'singbox' ? currentPlatform() : '', expires_in: Number(expiresInput.value), links }) });
+            const response = await fetch('/api/short-links', {
+                method: 'POST',
+                headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+                body: JSON.stringify({
+                    name: nameInput.value.trim(),
+                    target: currentTarget(),
+                    platform: currentTarget() === 'singbox' ? currentPlatform() : '',
+                    expires_in: Number(expiresInput.value),
+                    links: finalLinks
+                })
+            });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || ('创建失败（' + response.status + '）'));
             shortUrl.value = data.short_url;
@@ -660,7 +750,7 @@
             resultMeta.textContent = data.links_count + ' 个输入 · 短链过期时间：' + formatDate(data.expires_at, '永久');
             resultCard.classList.remove('hidden');
             await loadPreview(data.preview_url);
-            setMessage('短链创建成功。', false);
+            setMessage('短链创建成功。' + (finalLinks.length < links.length ? '（已自动过滤 ' + (links.length - finalLinks.length) + ' 个提示/匹配节点）' : ''), false);
             await loadList();
         } catch (error) { setMessage(error.message, true); }
     });
@@ -669,6 +759,25 @@
     syncPlatformState();
 
     $('#copy-button').onclick = () => copyText(shortUrl.value);
+    if (qrBtn) qrBtn.onclick = () => showQrModal(shortUrl.value);
+    if (qrCloseBtn) qrCloseBtn.onclick = hideQrModal;
+    if (qrModal) qrModal.onclick = (e) => { if (e.target === qrModal) hideQrModal(); };
+
+    if (importClashBtn) {
+        importClashBtn.onclick = () => {
+            if (!shortUrl.value) return;
+            const fullUrl = absoluteUrl(shortUrl.value);
+            openClientScheme('clash://install-config?url=' + encodeURIComponent(fullUrl), fullUrl);
+        };
+    }
+    if (importSingboxBtn) {
+        importSingboxBtn.onclick = () => {
+            if (!shortUrl.value) return;
+            const fullUrl = absoluteUrl(shortUrl.value);
+            openClientScheme('sing-box://import-remote-profile?url=' + encodeURIComponent(fullUrl), fullUrl);
+        };
+    }
+
     $('#clear-button').onclick = () => {
         linksInput.value = '';
         nameInput.value = '';
