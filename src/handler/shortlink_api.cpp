@@ -805,7 +805,7 @@ std::string refreshShortLink(RESPONSE_CALLBACK_ARGS)
     std::string snapshot_payload;
     if(conversion_response.status_code < 200 || conversion_response.status_code >= 300 || snapshot.empty() || !secret_box.encrypt(snapshot, snapshot_payload))
         return json_error(response, conversion_response.status_code >= 400 ? conversion_response.status_code : 500, "unable to refresh short-link snapshot");
-    if(!store.update_snapshot(owner, id, snapshot_payload, json_headers(conversion_response.headers), sha256Hex(snapshot), unix_now()))
+    if(!store.update_snapshot(owner, id, snapshot_payload, json_headers(conversion_response.headers), sha256Hex(snapshot), unix_now(), admin))
         return json_error(response, 404, "short link not found");
     response.content_type = "application/json;charset=utf-8";
     return "{\"status\":\"refreshed\"}";

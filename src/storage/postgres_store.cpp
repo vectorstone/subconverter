@@ -536,22 +536,35 @@ bool PostgresStore::delete_short_link(const std::string &owner, const std::strin
     return changed;
 }
 
-bool PostgresStore::update_snapshot(const std::string &owner, const std::string &id, const std::string &snapshot_payload, const std::string &response_headers, const std::string &content_hash, std::int64_t updated_at)
+bool PostgresStore::update_snapshot(const std::string &owner, const std::string &id, const std::string &snapshot_payload, const std::string &response_headers, const std::string &content_hash, std::int64_t updated_at, bool all_owners)
 {
     std::lock_guard<std::mutex> guard(mutex_);
     if(!connection_ || owner.empty() || id.empty() || snapshot_payload.empty())
         return false;
     const std::string timestamp = std::to_string(updated_at);
     const char *values[] = {owner.c_str(), id.c_str(), snapshot_payload.c_str(), response_headers.c_str(), content_hash.c_str(), timestamp.c_str()};
+    // The administrator path refreshes any owner's row, matching
+    // get_short_link_by_id/list_short_links/revoke_short_link/delete_short_link.
+    // Without it an administrator could see and revoke another user's short
+    // link but never refresh it, and the failed UPDATE was reported as a
+    // misleading 404 "short link not found".
+    const std::string archive_sql = all_owners
+        ? "INSERT INTO short_link_versions(short_link_id, snapshot_payload, response_headers, content_hash) SELECT id, snapshot_payload, response_headers, content_hash FROM short_links WHERE id::text = $1 AND revoked_at IS NULL"
+        : "INSERT INTO short_link_versions(short_link_id, snapshot_payload, response_headers, content_hash) SELECT id, snapshot_payload, response_headers, content_hash FROM short_links WHERE owner_subject = $1 AND id::text = $2 AND revoked_at IS NULL";
+    const std::string update_sql = all_owners
+        ? "UPDATE short_links SET snapshot_payload = $2, response_headers = $3, content_hash = $4, updated_at = to_timestamp($5::double precision) WHERE id::text = $1 AND revoked_at IS NULL"
+        : "UPDATE short_links SET snapshot_payload = $3, response_headers = $4, content_hash = $5, updated_at = to_timestamp($6::double precision) WHERE owner_subject = $1 AND id::text = $2 AND revoked_at IS NULL";
+    const std::vector<const char *> archive_values = all_owners ? std::vector<const char *>{values[1]} : std::vector<const char *>{values[0], values[1]};
+    const std::vector<const char *> update_values = all_owners ? std::vector<const char *>{values[1], values[2], values[3], values[4], values[5]} : std::vector<const char *>{values[0], values[1], values[2], values[3], values[4], values[5]};
     if(!exec_command(connection_, "BEGIN"))
         return false;
     PGresult *result = nullptr;
-    bool ok = exec_params(connection_, "INSERT INTO short_link_versions(short_link_id, snapshot_payload, response_headers, content_hash) SELECT id, snapshot_payload, response_headers, content_hash FROM short_links WHERE owner_subject = $1 AND id::text = $2 AND revoked_at IS NULL", {values[0], values[1]}, &result);
+    bool ok = exec_params(connection_, archive_sql, archive_values, &result);
     PQclear(result);
     if(ok)
     {
         result = nullptr;
-        ok = exec_params(connection_, "UPDATE short_links SET snapshot_payload = $3, response_headers = $4, content_hash = $5, updated_at = to_timestamp($6::double precision) WHERE owner_subject = $1 AND id::text = $2 AND revoked_at IS NULL", {values[0], values[1], values[2], values[3], values[4], values[5]}, &result);
+        ok = exec_params(connection_, update_sql, update_values, &result);
         const bool changed = ok && PQcmdTuples(result) && std::atoi(PQcmdTuples(result)) == 1;
         PQclear(result);
         ok = changed;

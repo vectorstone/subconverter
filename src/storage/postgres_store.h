@@ -64,7 +64,7 @@ public:
     bool get_download_sequence(const ShortLinkRecord &record, int &sequence);
     bool revoke_short_link(const std::string &owner, const std::string &id, bool all_owners = false);
     bool delete_short_link(const std::string &owner, const std::string &id, bool all_owners = false);
-    bool update_snapshot(const std::string &owner, const std::string &id, const std::string &snapshot_payload, const std::string &response_headers, const std::string &content_hash, std::int64_t updated_at);
+    bool update_snapshot(const std::string &owner, const std::string &id, const std::string &snapshot_payload, const std::string &response_headers, const std::string &content_hash, std::int64_t updated_at, bool all_owners = false);
 
     bool usage_user_exists(const std::string &owner);
     bool list_usage_bindings(const std::string &owner, bool all_owners, const std::string &cursor, int limit, std::vector<UsageBinding> &records);

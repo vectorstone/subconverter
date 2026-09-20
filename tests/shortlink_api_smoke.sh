@@ -5,8 +5,10 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:25500}"
 ASSERT_LITE_OUTPUT="${ASSERT_LITE_OUTPUT:-0}"
 LITE_MAX_SNAPSHOT_BYTES="${LITE_MAX_SNAPSHOT_BYTES:-262144}"
 
-# Authenticate either with a provisioned API key (X-API-Key) or with the
-# service admin token (Authorization: Bearer).
+# Authenticate either with a provisioned API key (X-API-Key), the service admin
+# token (Authorization: Bearer), or the trusted access header that the portal
+# uses behind the identity proxy (Cf-Access-Authenticated-User-Email, which
+# requires SHORTLINK_TRUST_ACCESS_HEADER=true on the service).
 AUTH_ARGS=()
 if [[ -n "${API_KEY:-}" ]]; then
     AUTH_ARGS+=(-H "X-API-Key: ${API_KEY}")
@@ -14,8 +16,11 @@ fi
 if [[ -n "${API_TOKEN:-}" ]]; then
     AUTH_ARGS+=(-H "Authorization: Bearer ${API_TOKEN}")
 fi
+if [[ -n "${ACCESS_HEADER:-}" ]]; then
+    AUTH_ARGS+=(-H "Cf-Access-Authenticated-User-Email: ${ACCESS_HEADER}")
+fi
 if [[ ${#AUTH_ARGS[@]} -eq 0 ]]; then
-    echo 'API_KEY or API_TOKEN is required' >&2
+    echo 'API_KEY, API_TOKEN, or ACCESS_HEADER is required' >&2
     exit 1
 fi
 
@@ -183,6 +188,43 @@ bad_target=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST -H 'C
 if [[ "${bad_target}" != "400" ]]; then
     echo "shortlink-smoke-failed: unsupported target returned ${bad_target}" >&2
     exit 1
+fi
+
+# ------------------------------------------ cross-administrator refresh
+# An administrator must be able to refresh a short link created by another
+# administrator. Every owner-scoped store query except update_snapshot carried
+# an all_owners switch, so the refresh updated zero rows and was reported as
+# 404 "short link not found" even though the handler had just read that same row
+# successfully through the administrator path. This needs the access-header mode
+# with two subjects in SHORTLINK_ADMIN_SUBJECTS: API keys are never
+# administrators, and the bootstrap token maps every caller onto one owner.
+if [[ -n "${ACCESS_HEADER_A:-}" && -n "${ACCESS_HEADER_B:-}" ]]; then
+    cross_payload='{"name":"smoke-cross-admin","target":"clash","expires_in":3600,"links":["ss://YWVzLTEyOC1nY206Zml4dHVyZQ==@198.51.100.10:443#smoke"]}'
+    cross_response=$(curl -fsS --max-time 30 -X POST -H 'Content-Type: application/json' \
+        -H "Cf-Access-Authenticated-User-Email: ${ACCESS_HEADER_A}" \
+        --data-binary "${cross_payload}" "${BASE_URL}/api/short-links")
+    cross_id=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"${cross_response}")
+    cross_list=$(curl -fsS --max-time 10 -H "Cf-Access-Authenticated-User-Email: ${ACCESS_HEADER_B}" "${BASE_URL}/api/short-links")
+    python3 -c 'import json,sys; data=json.load(sys.stdin); assert any(item["id"] == sys.argv[1] for item in data["items"]), data' "${cross_id}" <<<"${cross_list}"
+    if ! curl -fsS --max-time 30 -X POST --data-binary "" \
+        -H "Cf-Access-Authenticated-User-Email: ${ACCESS_HEADER_B}" \
+        "${BASE_URL}/api/short-links/${cross_id}/refresh" | grep -q refreshed; then
+        echo 'shortlink-smoke-failed: a second administrator could not refresh another administrator short link' >&2
+        exit 1
+    fi
+    if [[ -n "${ACCESS_HEADER_C:-}" ]]; then
+        cross_non_admin=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST --data-binary "" \
+            -H "Cf-Access-Authenticated-User-Email: ${ACCESS_HEADER_C}" \
+            "${BASE_URL}/api/short-links/${cross_id}/refresh")
+        if [[ "${cross_non_admin}" != "404" ]]; then
+            echo "shortlink-smoke-failed: a non-administrator refreshed another administrator short link (${cross_non_admin})" >&2
+            exit 1
+        fi
+    fi
+    curl -fsS --max-time 10 -X DELETE -H "Cf-Access-Authenticated-User-Email: ${ACCESS_HEADER_B}" "${BASE_URL}/api/short-links/${cross_id}" | grep -q revoked
+    echo '  ok: cross-administrator short-link refresh'
+else
+    echo 'shortlink-smoke-warning: set ACCESS_HEADER_A and ACCESS_HEADER_B (two subjects from SHORTLINK_ADMIN_SUBJECTS, with SHORTLINK_TRUST_ACCESS_HEADER=true) to exercise the cross-administrator refresh regression' >&2
 fi
 
 echo 'shortlink-smoke-ok'
