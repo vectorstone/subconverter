@@ -377,15 +377,18 @@ const Profile &profileOf(Platform platform)
     // cache pinned to a known name instead of relying on that default.
     static const Profile macos_profile = {
         true, true, 1500, true, true, false, false, false, false,
-        true, true, true, "cache.db", false, "warn", true, "prefer_ipv4"
+        true, true, true, "cache.db", false, "warn", true, "prefer_ipv4",
+        true
     };
     static const Profile windows_profile = {
         true, true, 1500, true, true, false, false, false, false,
-        true, true, true, "cache.db", false, "warn", true, "prefer_ipv4"
+        true, true, true, "cache.db", false, "warn", true, "prefer_ipv4",
+        false
     };
     static const Profile linux_profile = {
         true, true, 1500, true, true, false, false, false, false,
-        true, true, true, "cache.db", false, "warn", true, "prefer_ipv4"
+        true, true, true, "cache.db", false, "warn", true, "prefer_ipv4",
+        false
     };
     // android: route_auto_detect_interface must stay true. `constant.IsLinux`
     // covers Android, so the kernel accepts the field, and it is the only path
@@ -396,17 +399,26 @@ const Profile &profileOf(Platform platform)
     // device forwards DNS to itself in a loop and has no usable traffic.
     // iOS is the opposite: ExtensionPlatformInterface.usePlatformAutoDetectControl()
     // returns false, so the field would merely bind physical NICs.
+    //
+    // dns_direct_local: Android and Apple (iOS/macOS) platforms emit `type: "local"`
+    // for dns-direct by default, avoiding cellular/Wi-Fi carrier UDP 53 throttling
+    // and bootstrap timeouts for node domains while leveraging native system
+    // resolvers. OpenWrt strictly keeps `type: "udp"` with an explicit IP to
+    // prevent fatal DNS loops with the host dnsmasq daemon.
     static const Profile android_profile = {
         false, true, 1500, true, false, false, true, false, true,
-        false, false, true, "cache.db", false, "warn", true, "prefer_ipv4"
+        false, false, true, "cache.db", false, "warn", true, "prefer_ipv4",
+        true
     };
     static const Profile ios_profile = {
         false, true, 1500, false, false, false, true, false, false,
-        false, false, false, "cache.db", false, "warn", true, "prefer_ipv4"
+        false, false, false, "cache.db", false, "warn", true, "prefer_ipv4",
+        true
     };
     static const Profile openwrt_profile = {
         false, true, 1500, true, true, true, false, true, false,
-        true, true, true, "/opt/open-box/data/cache.db", true, "warn", false, "ipv4_only"
+        true, true, true, "/opt/open-box/data/cache.db", true, "warn", false, "ipv4_only",
+        false
     };
 
     switch(platform)
@@ -475,9 +487,16 @@ void applySkeleton(Document &doc, const Settings &settings, std::vector<RuleSetS
         }
 
         Value direct(kObjectType);
-        direct.AddMember("type", makeString("udp", allocator), allocator);
         direct.AddMember("tag", makeString("dns-direct", allocator), allocator);
-        direct.AddMember("server", makeString(settings.dns_direct_server, allocator), allocator);
+        if(profile.dns_direct_local && (settings.dns_direct_server.empty() || settings.dns_direct_server == "223.5.5.5"))
+        {
+            direct.AddMember("type", makeString("local", allocator), allocator);
+        }
+        else
+        {
+            direct.AddMember("type", makeString("udp", allocator), allocator);
+            direct.AddMember("server", makeString(settings.dns_direct_server, allocator), allocator);
+        }
         servers.PushBack(direct, allocator);
 
         Value proxy(kObjectType);

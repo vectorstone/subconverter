@@ -143,6 +143,16 @@ def check_platform(name):
     if resolver and resolver not in {s.get("tag") for s in servers}:
         failures.append(f"{name}: default_domain_resolver points at an unknown server")
 
+    dns_direct = next((s for s in servers if s.get("tag") == "dns-direct"), None)
+    if not dns_direct:
+        failures.append(f"{name}: missing dns-direct server")
+    elif name in ("android", "ios", "macos"):
+        if dns_direct.get("type") != "local" or "server" in dns_direct:
+            failures.append(f"{name}: dns-direct must be type local without server")
+    else:
+        if dns_direct.get("type") != "udp" or dns_direct.get("server") != "223.5.5.5":
+            failures.append(f"{name}: dns-direct must be type udp with 223.5.5.5")
+
     tags = {o.get("tag") for o in doc.get("outbounds", [])}
     tags |= {e.get("tag") for e in doc.get("endpoints", [])}
     final = doc["route"].get("final")

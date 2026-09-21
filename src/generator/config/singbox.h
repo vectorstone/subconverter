@@ -70,6 +70,7 @@ struct Profile
     const char *log_level;
     bool log_timestamp;
     const char *dns_strategy;
+    bool dns_direct_local;
 };
 
 const Profile &profileOf(Platform platform);
