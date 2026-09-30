@@ -116,6 +116,7 @@ void explodeVmess(std::string vmess, Proxy &node);
 void explodeVless(std::string vless, Proxy &node);
 void explodeSSR(std::string ssr, Proxy &node);
 void explodeSS(std::string ss, Proxy &node);
+void explodeSocks5(std::string socks5, Proxy &node);
 void explodeTrojan(std::string trojan, Proxy &node);
 void explodeQuan(const std::string &quan, Proxy &node);
 void explodeStdVMess(std::string vmess, Proxy &node);

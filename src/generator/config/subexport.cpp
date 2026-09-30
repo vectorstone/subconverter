@@ -547,6 +547,8 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode, const ProxyGr
                 if(std::all_of(x.Password.begin(), x.Password.end(), ::isdigit))
                     singleproxy["password"].SetTag("str");
             }
+            if(!x.UnderlyingProxy.empty())
+                singleproxy["dialer-proxy"] = chain_entry_group_name;
             if(!scv.is_undef())
                 singleproxy["skip-cert-verify"] = scv.get();
             break;

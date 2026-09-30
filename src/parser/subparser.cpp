@@ -920,6 +920,51 @@ void explodeSocks(std::string link, Proxy &node)
     socksConstruct(node, group, remarks, server, port, username, password);
 }
 
+void explodeSocks5(std::string link, Proxy &node)
+{
+    std::string group, remarks, server, port, username, password, addition, underlying_proxy;
+    link = replaceAllDistinct(link.substr(9), "/?", "?"); //remove "socks5://"
+    if(strFind(link, "#"))
+    {
+        auto pos = link.find('#');
+        remarks = urlDecode(link.substr(pos + 1));
+        link.erase(pos);
+    }
+    if(strFind(link, "?"))
+    {
+        addition = link.substr(link.find('?') + 1);
+        link.erase(link.find('?'));
+    }
+    group = urlDecode(getUrlArg(addition, "group"));
+    if(group.empty())
+        group = SOCKS_DEFAULT_GROUP;
+    /// alias with x-sc-underlying-proxy preferred, others for compatibility
+    underlying_proxy = urlDecode(getUrlArg(addition, "x-sc-underlying-proxy"));
+    if(underlying_proxy.empty())
+        underlying_proxy = urlDecode(getUrlArg(addition, "underlying-proxy"));
+    if(underlying_proxy.empty())
+        underlying_proxy = urlDecode(getUrlArg(addition, "underlying_proxy"));
+    tribool udp = getUrlArg(addition, "udp");
+    tribool tfo = getUrlArg(addition, "tfo");
+    tribool scv = getUrlArg(addition, "allowInsecure");
+    if(strFind(link, "@"))
+    {
+        if(regGetMatch(link, "(.*?):(.*?)@(.+):(.+)", 5, 0, &username, &password, &server, &port))
+            return;
+    }
+    else
+    {
+        if(regGetMatch(link, "(.+):(.+)", 3, 0, &server, &port))
+            return;
+    }
+    if(port == "0")
+        return;
+    if(remarks.empty())
+        remarks = server + ":" + port;
+
+    socksConstruct(node, group, remarks, server, port, username, password, udp, tfo, scv, underlying_proxy);
+}
+
 void explodeHTTP(const std::string &link, Proxy &node)
 {
     std::string group, remarks, server, port, username, password;
@@ -2897,6 +2942,8 @@ void explode(const std::string &link, Proxy &node)
         explodeVmess(link, node);
     else if(startsWith(link, "ss://"))
         explodeSS(link, node);
+    else if(startsWith(link, "socks5://"))
+        explodeSocks5(link, node);
     else if(startsWith(link, "socks://") || startsWith(link, "https://t.me/socks") || startsWith(link, "tg://socks"))
         explodeSocks(link, node);
     else if(startsWith(link, "https://t.me/http") || startsWith(link, "tg://http")) //telegram style http link
