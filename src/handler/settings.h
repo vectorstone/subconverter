@@ -89,6 +89,8 @@ struct ExternalConfig
     std::string loon_rule_base;
     std::string sssub_rule_base;
     std::string singbox_rule_base;
+    std::string clash_rule_provider_url_prefix;
+    std::string clash_rule_provider_proxy;
     RegexMatchConfigs rename;
     RegexMatchConfigs emoji;
     string_array include;

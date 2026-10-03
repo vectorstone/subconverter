@@ -55,6 +55,9 @@ RUN apk add --no-cache --virtual subconverter-deps pcre2 libcurl yaml-cpp postgr
 
 COPY --from=builder /subconverter/subconverter /usr/bin/
 COPY base /base/
+# Only the Lite provider bundle must come from the update step above. Keep all
+# other fork-maintained base assets pinned to the checked-in build context.
+COPY --from=builder /subconverter/base/rules/clash-lite /base/rules/clash-lite/
 
 ENV TZ=Africa/Abidjan
 RUN ln -sf /usr/share/zoneinfo/$TZ /etc/localtime

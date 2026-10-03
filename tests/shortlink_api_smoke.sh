@@ -4,6 +4,7 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://127.0.0.1:25500}"
 ASSERT_LITE_OUTPUT="${ASSERT_LITE_OUTPUT:-0}"
 LITE_MAX_SNAPSHOT_BYTES="${LITE_MAX_SNAPSHOT_BYTES:-262144}"
+EXPECTED_CLASH_RULESET_BASE_URL="${EXPECTED_CLASH_RULESET_BASE_URL:-${BASE_URL%/}/rules/clash-lite}"
 
 # Authenticate either with a provisioned API key (X-API-Key), the service admin
 # token (Authorization: Bearer), or the trusted access header that the portal
@@ -28,16 +29,38 @@ assert_lite_snapshot()
 {
     local body="$1"
     local body_size
+    local provider_count
+    local rule_count
+    local ruleset_count
+    local last_rule
     body_size=$(wc -c <<<"${body}")
     if (( body_size > LITE_MAX_SNAPSHOT_BYTES )); then
         echo "shortlink-lite-smoke-failed: snapshot is ${body_size} bytes (limit ${LITE_MAX_SNAPSHOT_BYTES})" >&2
         exit 1
     fi
 
-    if ! grep -q '^rule-providers:' <<<"${body}" || ! grep -q 'RULE-SET,' <<<"${body}"; then
-        echo 'shortlink-lite-smoke-failed: snapshot is not using rule providers' >&2
+    provider_count=$(awk '$0 == "rule-providers:" { in_providers=1; next } in_providers && /^  [^ ].*:$/ { count++; next } in_providers && /^[^ ]/ { exit } END { print count + 0 }' <<<"${body}")
+    rule_count=$(awk '$0 == "rules:" { in_rules=1; next } in_rules && /^  - / { count++; next } in_rules && /^[^ ]/ { exit } END { print count + 0 }' <<<"${body}")
+    ruleset_count=$(awk '$0 == "rules:" { in_rules=1; next } in_rules && /^  - RULE-SET,/ { count++; next } in_rules && /^[^ ]/ { exit } END { print count + 0 }' <<<"${body}")
+    last_rule=$(awk '$0 == "rules:" { in_rules=1; next } in_rules && /^  - / { last=substr($0, 5); next } in_rules && /^[^ ]/ { exit } END { print last }' <<<"${body}")
+    if [[ "${provider_count}" != "5" || "${rule_count}" != "30" || "${ruleset_count}" != "5" || "${last_rule}" != "MATCH,🚀 节点选择" ]]; then
+        echo "shortlink-lite-smoke-failed: providers=${provider_count}, rules=${rule_count}, rule-sets=${ruleset_count}, last=${last_rule}" >&2
         exit 1
     fi
+
+    local name
+    local provider_url
+    for name in proxy telegramcidr private applications cncidr; do
+        provider_url=$(awk -v heading="  ${name}:" '$0 == heading { in_provider=1; next } in_provider && /^    url: / { sub(/^    url: /, ""); print; exit }' <<<"${body}")
+        if [[ "${provider_url}" != "${EXPECTED_CLASH_RULESET_BASE_URL%/}/${name}.yaml" ]]; then
+            echo "shortlink-lite-smoke-failed: unexpected ${name} provider URL" >&2
+            exit 1
+        fi
+        if [[ "$(curl -fsS --max-time 30 "${provider_url}" | sed -n '1p')" != "payload:" ]]; then
+            echo "shortlink-lite-smoke-failed: ${name} provider is unavailable or invalid" >&2
+            exit 1
+        fi
+    done
 }
 
 payload='{"name":"smoke-test","target":"clash","expires_in":3600,"links":["ss://YWVzLTEyOC1nY206Zml4dHVyZQ==@198.51.100.10:443#smoke"]}'

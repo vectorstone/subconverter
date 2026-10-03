@@ -2,6 +2,7 @@
 #include <string>
 #include <unistd.h>
 #include <csignal>
+#include <set>
 
 #include <sys/types.h>
 #include <dirent.h>
@@ -195,6 +196,31 @@ int main(int argc, char *argv[])
     {
         return "subconverter " VERSION " backend\n";
     });
+
+    const std::string clash_lite_rules_path = R"(/rules/clash-lite/(proxy|telegramcidr|private|applications|cncidr)\.yaml)";
+    auto serve_clash_lite_rule = [](RESPONSE_CALLBACK_ARGS) -> std::string
+    {
+        const std::string prefix = "/rules/clash-lite/";
+        const std::string filename = request.url.substr(prefix.size());
+        static const std::set<std::string> allowed = {
+            "proxy.yaml", "telegramcidr.yaml", "private.yaml", "applications.yaml", "cncidr.yaml"
+        };
+        if(allowed.find(filename) == allowed.end())
+        {
+            response.status_code = 404;
+            return "Not Found\n";
+        }
+        const std::string path = "rules/clash-lite/" + filename;
+        if(!fileExist(path, true))
+        {
+            response.status_code = 404;
+            return "Not Found\n";
+        }
+        response.headers["Cache-Control"] = "public, max-age=3600";
+        return fileGet(path, true);
+    };
+    webServer.append_response("GET", clash_lite_rules_path, "text/yaml;charset=utf-8", serve_clash_lite_rule);
+    webServer.append_response("HEAD", clash_lite_rules_path, "text/yaml;charset=utf-8", serve_clash_lite_rule);
 
     webServer.append_response("GET", "/refreshrules", "text/plain", [](RESPONSE_CALLBACK_ARGS) -> std::string
     {

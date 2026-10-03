@@ -50,7 +50,7 @@ UI 测试自启 loopback 服务，使用合成 API，覆盖 1440px/390px、超�
 7. 备份并安装 `deploy/nginx/` 下的三个文件，`nginx -t` 通过后 reload：
    - `50-subconverter-limit.conf`：http 上下文的 `limit_req_zone` 与 429 用的 `map`，必须放在 `conf.d/` 或其它 http 级 include，放进 `server {}` 会让 `nginx -t` 直接失败；
    - `20-cloudflare-realip.conf`：按 Cloudflare 官方网段恢复真实客户端 IP，否则 `limit_req` 按边缘节点 IP 统计，多用户互相挤占配额；
-   - `hi.example.com.conf`：站点配置（`/api/`、`/s/`、`/sub` 的反代与限流）。
+   - `hi.example.com.conf`：站点配置（`/api/`、`/s/`、`/sub`、`/rules/clash-lite/` 的反代与限流）。
    `/api/` 的邮件头只能来自验证器，显式 API Key/Bearer 仍由 C++ 验证。`SHORTLINK_TRUST_ACCESS_HEADER=true` 只可用于该受保护源站，禁止把后端端口暴露公网。
 8. 把 `providers.json`、CA、客户端证书和私钥放在 `/opt/subconverter/usage/`。Provider JSON 合约见 `deploy/usage-providers.example.json`；私钥 0600。容器以只读方式挂载到 `/run/usage/`。
 9. 使用 `docker-compose.usage.yml` 叠加到现有 Compose。`PUBLIC_BASE_URL` 必须等于实际门户 Origin，不能带末尾斜杠。先设置 `SHORTLINK_USAGE_ENABLED=false`，只更新 subconverter，检查 `/version` 和旧快照。
@@ -64,7 +64,7 @@ UI 测试自启 loopback 服务，使用合成 API，覆盖 1440px/390px、超�
 ## 反向代理、限流与真实 IP
 
 - 三个 nginx 片段必须一起安装（见部署顺序第 7 步）。`50-subconverter-limit.conf` 与 `20-cloudflare-realip.conf` 是 http 上下文配置（`limit_req_zone`、`map`、`set_real_ip_from`），只能被 `conf.d/*.conf` 这类 http 级 include 加载；`hi.example.com.conf` 是 vhost。文件名前缀只为可读，不影响这些指令的生效。
-- 限流语义：`/api/` 为 `60r/m burst=20 nodelay`，`/s/` 与 `/sub` 共用另一个 `60r/m burst=20 nodelay` 桶。超限统一返回 **429**（`limit_req_status 429`）并带 `Retry-After: 2`。nginx 的 `limit_req` 默认返回 503 且不带 `Retry-After`，门户会把网关 HTML 误当成后端故障，`loadPreview` 之类的旧代码还会把整页 HTML 显示出来；因此三个 location 都要保留 `limit_req_status` 与 `add_header Retry-After $subconverter_retry_after always`。
+- 限流语义：`/api/` 为 `60r/m burst=20 nodelay`，`/s/` 与 `/sub` 共用另一个 `60r/m burst=20 nodelay` 桶，`/rules/clash-lite/` 使用 `120r/m burst=10 nodelay` 的独立 provider 桶。超限统一返回 **429**（`limit_req_status 429`）并带 `Retry-After: 2`。nginx 的 `limit_req` 默认返回 503 且不带 `Retry-After`，门户会把网关 HTML 误当成后端故障，`loadPreview` 之类的旧代码还会把整页 HTML 显示出来；因此这些 location 都要保留 `limit_req_status` 与 `add_header Retry-After $subconverter_retry_after always`。
 - 503 留给真实故障：后端不可用时返回 JSON `{"error":"short-link service is unavailable"}`。门户只显示状态码或 JSON `error`，不回显 HTML。
 - 真实 IP：`20-cloudflare-realip.conf` 只信任 <https://www.cloudflare.com/ips-v4> 与 <https://www.cloudflare.com/ips-v6> 的官方网段，再用 `CF-Connecting-IP` 还原 `$binary_remote_addr`。网段会变化，更新后 `nginx -t` 再 reload。
 - 前提：源站必须经 Cloudflare 回源。若改用 Cloudflare Tunnel，nginx 看到的源地址是 `127.0.0.1`，realip 不生效，所有用户会共用同一个限流桶；此时要么按用户维度重新限流，要么确认隧道链路已在上游限流。

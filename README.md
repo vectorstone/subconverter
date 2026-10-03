@@ -137,7 +137,7 @@ The built-in default Clash chain config keeps `♻️ 自动选择` as a `url-te
 
 With `SHORTLINK_ENABLED=true`, `DATABASE_URL`, and `SHORTLINK_ENCRYPTION_KEY` configured, the service provides a Cloudflare Access-protected Web UI and PostgreSQL-backed short-link API. `GET /s/<code>` remains public and returns Clash YAML directly; create, list, refresh, revoke, and delete require Cloudflare Access or a user API key. `DELETE /api/short-links/<id>` revokes a link (the code then returns 410) while `POST /api/short-links/<id>/delete` permanently removes the row and its refresh history.
 
-Short links use the Lite Clash conversion profile by default: `SHORTLINK_CLASH_CONFIG=config/default_clash_lite.ini` and `SHORTLINK_CLASH_EXPAND=false`. The service selects the profile per target, disables inserts, and does not accept an arbitrary per-request `config` from Web UI/API users. This keeps stored Clash snapshots small by emitting remote rule providers instead of embedding the complete rule contents. `SHORTLINK_LITE_MAX_OUTPUT_BYTES` defaults to 262144 and rejects an unexpectedly large Lite snapshot before it is stored.
+Short links use the Lite Clash conversion profile by default: `SHORTLINK_CLASH_CONFIG=config/default_clash_lite.ini` and `SHORTLINK_CLASH_EXPAND=false`. The service selects the profile per target, disables inserts, and does not accept an arbitrary per-request `config` from Web UI/API users. This keeps stored Clash snapshots small by emitting five rule providers instead of embedding the complete rule contents. Those providers are served by this service at the public, fixed-name `/rules/clash-lite/*.yaml` endpoints; generated snapshots use `PUBLIC_BASE_URL/rules/clash-lite` by default, eliminating the client dependency on GitHub Raw. `SHORTLINK_CLASH_RULESET_BASE_URL` can point at another trusted mirror. Mihomo users may optionally set `SHORTLINK_CLASH_RULESET_PROXY` to a proxy-group name, but the cross-client default is empty. `SHORTLINK_LITE_MAX_OUTPUT_BYTES` defaults to 262144 and rejects an unexpectedly large Lite snapshot before it is stored.
 
 The Lite limit applies to the `clash` target only. A `singbox` short link is produced by the platform generator from the local preference rulesets and never uses the Lite profile, so it is bounded by `SHORTLINK_MAX_OUTPUT_BYTES` (16 MiB); applying the 256 KiB Lite limit to it would reject ordinary subscriptions. Short links accept `target=clash` and `target=singbox` with `platform=<macos|windows|linux|android|ios|openwrt>`.
 
@@ -150,7 +150,7 @@ API_KEY='your-user-api-key' BASE_URL='http://127.0.0.1:25500' ASSERT_LITE_OUTPUT
   bash tests/shortlink_api_smoke.sh
 ```
 
-`ASSERT_LITE_OUTPUT=1` additionally requires a bounded snapshot (default 256 KiB) containing `rule-providers` and `RULE-SET` references. Set `LITE_MAX_SNAPSHOT_BYTES` to adjust the test bound for a custom Lite template.
+`ASSERT_LITE_OUTPUT=1` additionally requires a bounded snapshot (default 256 KiB) with exactly five providers, five `RULE-SET` entries, 30 top-level rules, a final `MATCH`, and reachable provider payloads. Set `LITE_MAX_SNAPSHOT_BYTES` to adjust the size bound or `EXPECTED_CLASH_RULESET_BASE_URL` when testing an intentional mirror.
 
 ---
 

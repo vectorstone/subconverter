@@ -629,6 +629,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
                         lCustomProxyGroups = extconf.custom_proxy_group;
                     ext.enable_rule_generator = extconf.enable_rule_generator;
                     ext.overwrite_original_rules = extconf.overwrite_original_rules;
+                    ext.clash_rule_provider_url_prefix = extconf.clash_rule_provider_url_prefix;
+                    ext.clash_rule_provider_proxy = extconf.clash_rule_provider_proxy;
                 }
             }
             if(!extconf.rename.empty())

@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import stat
+from typing import Optional
 from git import InvalidGitRepositoryError, Repo
 
 
@@ -22,7 +23,7 @@ def open_repo(path: str):
         return None
 
 
-def update_rules(repo_path: str, save_path: str, matches: list[str], keep_tree: bool):
+def update_rules(repo_path: str, save_path: str, matches: list[str], keep_tree: bool, dest_extension: Optional[str]):
     os.makedirs(save_path, exist_ok=True)
     for pattern in matches:
         files = glob.glob(os.path.join(repo_path, pattern), recursive=True)
@@ -33,6 +34,8 @@ def update_rules(repo_path: str, save_path: str, matches: list[str], keep_tree: 
             if os.path.isdir(file):
                 continue
             file_rel_path, file_name = os.path.split(os.path.relpath(file, repo_path))
+            if dest_extension is not None:
+                file_name = os.path.splitext(file_name)[0] + dest_extension
             if keep_tree:
                 file_dest_dir = os.path.join(save_path, file_rel_path)
                 os.makedirs(file_dest_dir, exist_ok=True)
@@ -59,6 +62,7 @@ def main():
         matches = config.get(section, "match").split("|")
         save_path = config.get(section, "dest", fallback=f"base/rules/{repo}")
         keep_tree = config.getboolean(section, "keep_tree", fallback=True)
+        dest_extension = config.get(section, "dest_extension", fallback=None)
 
         logging.info(f"reading files from url {url}, matches {matches}, save to {save_path} keep_tree {keep_tree}")
 
@@ -85,7 +89,7 @@ def main():
             logging.error(f"checkout failed {e}")
             continue
 
-        update_rules(repo_path, save_path, matches, keep_tree)
+        update_rules(repo_path, save_path, matches, keep_tree, dest_extension)
 
     shutil.rmtree("./tmp", ignore_errors=True)
 

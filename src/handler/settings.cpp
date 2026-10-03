@@ -1115,6 +1115,8 @@ int loadExternalYAML(YAML::Node &node, ExternalConfig &ext)
     section["loon_rule_base"] >> ext.loon_rule_base;
     section["sssub_rule_base"] >> ext.sssub_rule_base;
     section["singbox_rule_base"] >> ext.singbox_rule_base;
+    section["clash_rule_provider_url_prefix"] >> ext.clash_rule_provider_url_prefix;
+    section["clash_rule_provider_proxy"] >> ext.clash_rule_provider_proxy;
 
     section["enable_rule_generator"] >> ext.enable_rule_generator;
     section["overwrite_original_rules"] >> ext.overwrite_original_rules;
@@ -1190,6 +1192,8 @@ int loadExternalTOML(toml::value &root, ExternalConfig &ext)
                   "loon_rule_base", ext.loon_rule_base,
                   "sssub_rule_base", ext.sssub_rule_base,
                   "singbox_rule_base", ext.singbox_rule_base,
+                  "clash_rule_provider_url_prefix", ext.clash_rule_provider_url_prefix,
+                  "clash_rule_provider_proxy", ext.clash_rule_provider_proxy,
                   "add_emoji", ext.add_emoji,
                   "remove_old_emoji", ext.remove_old_emoji,
                   "include_remarks", ext.include,
@@ -1292,6 +1296,8 @@ int loadExternalConfig(std::string &path, ExternalConfig &ext)
     ini.get_if_exist("loon_rule_base", ext.loon_rule_base);
     ini.get_if_exist("sssub_rule_base", ext.sssub_rule_base);
     ini.get_if_exist("singbox_rule_base", ext.singbox_rule_base);
+    ini.get_if_exist("clash_rule_provider_url_prefix", ext.clash_rule_provider_url_prefix);
+    ini.get_if_exist("clash_rule_provider_proxy", ext.clash_rule_provider_proxy);
 
     ini.get_bool_if_exist("overwrite_original_rules", ext.overwrite_original_rules);
     ini.get_bool_if_exist("enable_rule_generator", ext.enable_rule_generator);

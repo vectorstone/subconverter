@@ -52,6 +52,8 @@ struct ShortLinkConfig
     // Short-link conversions never accept a client-provided config path.
     std::string clash_config = shortlink_clash_lite_config_path;
     bool clash_expand = false;
+    std::string clash_ruleset_base_url;
+    std::string clash_ruleset_proxy;
     std::string singbox_platform = "macos";
     std::string singbox_default;
     std::string singbox_auto_include;
@@ -146,6 +148,35 @@ void configure_shortlink_clash_profile()
         writeLog(0, "Ignoring unsupported SHORTLINK_CLASH_CONFIG selection; using the Lite profile.", LOG_LEVEL_WARNING);
     }
     config.clash_expand = env_bool("SHORTLINK_CLASH_EXPAND", false);
+}
+
+bool valid_provider_base_url(const std::string &value)
+{
+    return (startsWith(value, "https://") || startsWith(value, "http://"))
+        && value.find_first_of("\r\n?#") == std::string::npos;
+}
+
+void configure_shortlink_clash_rulesets()
+{
+    const std::string default_url = config.public_base_url.empty()
+        ? "" : config.public_base_url + "/rules/clash-lite";
+    config.clash_ruleset_base_url = trim(getEnv("SHORTLINK_CLASH_RULESET_BASE_URL"));
+    if(config.clash_ruleset_base_url.empty())
+        config.clash_ruleset_base_url = default_url;
+    while(!config.clash_ruleset_base_url.empty() && config.clash_ruleset_base_url.back() == '/')
+        config.clash_ruleset_base_url.pop_back();
+    if(!config.clash_ruleset_base_url.empty() && !valid_provider_base_url(config.clash_ruleset_base_url))
+    {
+        writeLog(0, "Ignoring malformed SHORTLINK_CLASH_RULESET_BASE_URL; using the PUBLIC_BASE_URL default.", LOG_LEVEL_WARNING);
+        config.clash_ruleset_base_url = default_url;
+    }
+
+    config.clash_ruleset_proxy = trim(getEnv("SHORTLINK_CLASH_RULESET_PROXY"));
+    if(config.clash_ruleset_proxy.size() > 128 || config.clash_ruleset_proxy.find_first_of("\r\n") != std::string::npos)
+    {
+        writeLog(0, "Ignoring malformed SHORTLINK_CLASH_RULESET_PROXY.", LOG_LEVEL_WARNING);
+        config.clash_ruleset_proxy.clear();
+    }
 }
 
 bool lite_snapshot_too_large(const std::string &snapshot, const std::string &target)
@@ -674,6 +705,10 @@ std::string conversion_snapshot(const string_array &links, const std::string &ta
         // of the explicitly allowed bundled rollback profiles at startup.
         conversion_request.argument.emplace("config", config.clash_config);
         conversion_request.argument.emplace("expand", config.clash_expand ? "true" : "false");
+        if(config.clash_config == shortlink_clash_lite_config_path && !config.clash_ruleset_base_url.empty())
+            conversion_request.argument.emplace("clash_rule_provider_url_prefix", config.clash_ruleset_base_url);
+        if(config.clash_config == shortlink_clash_lite_config_path && !config.clash_ruleset_proxy.empty())
+            conversion_request.argument.emplace("clash_rule_provider_proxy", config.clash_ruleset_proxy);
     }
     conversion_request.headers = {};
     std::string snapshot = subconverter(conversion_request, conversion_response);
@@ -821,6 +856,7 @@ bool initializeShortLinkService()
         }
     }
     configure_shortlink_clash_profile();
+    configure_shortlink_clash_rulesets();
     if(config.connection_string.empty() || config.encryption_key.empty())
     {
         writeLog(0, "SHORTLINK_ENABLED requires DATABASE_URL and SHORTLINK_ENCRYPTION_KEY.", LOG_LEVEL_ERROR);

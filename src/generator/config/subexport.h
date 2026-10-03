@@ -41,6 +41,8 @@ struct extra_settings
     std::string sort_script;
     std::string clash_proxies_style = "flow";
     std::string clash_proxy_groups_style = "flow";
+    std::string clash_rule_provider_url_prefix;
+    std::string clash_rule_provider_proxy;
     bool authorized = false;
 
     /// sing-box generation

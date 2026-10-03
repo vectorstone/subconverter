@@ -1499,7 +1499,7 @@ http://127.0.0.1:25500/getruleset?type=%TYPE%&url=%URL%&group=%GROUP%
 
 短链采用快照模式。已有短链可以作为新的 HTTPS 输入源，与其他 SS、VLESS、TUIC 或机场订阅合并后生成新的短链。短链内容、过期时间和撤销状态保存在 PostgreSQL 中，节点凭据通过 SHORTLINK_ENCRYPTION_KEY 加密。
 
-短链的 Clash 目标统一使用 Lite 转换方案：`SHORTLINK_CLASH_CONFIG` 默认 `config/default_clash_lite.ini`，`SHORTLINK_CLASH_EXPAND` 默认 `false`。服务端按目标选择配置、固定 `insert=false`，并且 Web UI/API 不接受用户传入任意 `config`，生成结果通过远程 `rule-providers` 引用规则而不是把完整规则写入快照。`SHORTLINK_LITE_MAX_OUTPUT_BYTES` 默认 262144，Lite 快照异常增大时会在写入数据库前拒绝。
+短链的 Clash 目标统一使用 Lite 转换方案：`SHORTLINK_CLASH_CONFIG` 默认 `config/default_clash_lite.ini`，`SHORTLINK_CLASH_EXPAND` 默认 `false`。服务端按目标选择配置、固定 `insert=false`，并且 Web UI/API 不接受用户传入任意 `config`，生成结果通过 5 个 `rule-providers` 引用规则而不是把完整规则写入快照。规则文件由当前服务通过固定白名单路径 `/rules/clash-lite/*.yaml` 公开，快照默认引用 `PUBLIC_BASE_URL/rules/clash-lite`，不再要求客户端直连 GitHub Raw；也可用 `SHORTLINK_CLASH_RULESET_BASE_URL` 指向可信镜像。Mihomo 可选设置 `SHORTLINK_CLASH_RULESET_PROXY` 为策略组名，但为了兼容 Stash 等客户端，统一默认值为空。`SHORTLINK_LITE_MAX_OUTPUT_BYTES` 默认 262144，Lite 快照异常增大时会在写入数据库前拒绝。
 
 该 Lite 上限**只适用于 `clash` 目标**。`singbox` 短链由平台生成器根据本地偏好规则集生成，不使用 Lite 方案，因此只受 `SHORTLINK_MAX_OUTPUT_BYTES`（16 MiB）约束；对它套用 256 KiB 的 Lite 上限会误拒正常订阅。短链支持 `target=clash` 与 `target=singbox`，sing-box 需附带 `platform=<macos|windows|linux|android|ios|openwrt>`。
 
@@ -1529,7 +1529,7 @@ http://127.0.0.1:25500/getruleset?type=%TYPE%&url=%URL%&group=%GROUP%
 
 管理员通过 API_TOKEN 或 SHORTLINK_ADMIN_SUBJECTS（Cloudflare Access 邮箱/subject 白名单）识别。管理员可以查看、刷新、撤销和删除所有用户的短链，并通过 /api/admin/users 管理用户角色；普通用户只能管理自己的短链。普通用户也可以创建永久短链，但仍受有效数量和限流配额约束。
 
-生产部署请使用独立 PostgreSQL database/role，设置 api_mode=true，并为 /、/api/ 配置登录和限流；/s/ 与原有 /sub 需要保持客户端可访问但禁止缓存。详细接口、数据模型和部署步骤见 docs/short-link-postgresql-plan.md。
+生产部署请使用独立 PostgreSQL database/role，设置 api_mode=true，并为 /、/api/ 配置登录和限流；/s/、原有 /sub 与 `/rules/clash-lite/` 需要保持客户端可访问，其中前两者禁止缓存，provider 可短时公共缓存。详细接口、数据模型和部署步骤见 docs/short-link-postgresql-plan.md。
 
 本地认证 smoke 验收命令：
 
@@ -1538,4 +1538,4 @@ API_KEY='你的用户 API Key' BASE_URL='http://127.0.0.1:25500' ASSERT_LITE_OUT
   bash tests/shortlink_api_smoke.sh
 ```
 
-启用 `ASSERT_LITE_OUTPUT=1` 后，脚本还会断言快照不超过默认 256 KiB，并且同时包含 `rule-providers` 和 `RULE-SET` 引用。自定义 Lite 模板可通过 `LITE_MAX_SNAPSHOT_BYTES` 调整测试体积上限。
+启用 `ASSERT_LITE_OUTPUT=1` 后，脚本还会断言快照不超过默认 256 KiB，恰好包含 5 个 provider、5 条 `RULE-SET`、30 条顶层规则、末尾 `MATCH`，并逐个下载 provider 验证 `payload:`。自定义 Lite 模板可用 `LITE_MAX_SNAPSHOT_BYTES` 调整体积上限；使用有意配置的镜像时可设置 `EXPECTED_CLASH_RULESET_BASE_URL`。

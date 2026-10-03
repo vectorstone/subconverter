@@ -73,9 +73,11 @@
 
 - `SHORTLINK_CLASH_CONFIG`：默认 `config/default_clash_lite.ini`。
 - `SHORTLINK_CLASH_EXPAND`：默认 `false`。
+- `SHORTLINK_CLASH_RULESET_BASE_URL`：默认空；空值解析为 `PUBLIC_BASE_URL/rules/clash-lite`，也可覆盖为可信镜像。
+- `SHORTLINK_CLASH_RULESET_PROXY`：默认空；仅在明确使用 Mihomo 且需要经策略组下载 provider 时填写。
 - `SHORTLINK_LITE_MAX_OUTPUT_BYTES`：默认 262144，阻止异常增大的 Lite 快照写入数据库；**仅对 `clash` 目标生效**。`singbox` 快照由本地偏好规则集生成、不使用 Lite 方案，只受 `SHORTLINK_MAX_OUTPUT_BYTES`（默认 16 MiB）约束，否则正常规模的订阅会被误拒。
 
-Lite 模式避免把远端规则全文写入快照，生成 `rule-providers` 和少量 `RULE-SET` 引用，以限制数据库快照体积。转换阶段仍会读取规则源元数据，客户端也需要能够访问 provider URL。
+Lite 模式避免把规则全文写入快照，生成 `rule-providers` 和少量 `RULE-SET` 引用，以限制数据库快照体积。五份规则由构建阶段同步到 `base/rules/clash-lite/`，并通过固定白名单路由 `/rules/clash-lite/{proxy,telegramcidr,private,applications,cncidr}.yaml` 公开；客户端下载与短链同源，不再依赖 GitHub Raw。
 
 读取 `/s/<code>` 永远解密并返回已保存的快照，不会根据当前环境重新生成。因此 Lite 上线前生成的旧快照无需迁移，仍可原样读取。只有用户或管理员显式执行刷新时，服务才从该记录加密保存的原始链接重新转换，并以刷新时生效的 `SHORTLINK_CLASH_CONFIG`/`SHORTLINK_CLASH_EXPAND` 写入新的快照；链式短链的下游快照不会被级联重算。
 
@@ -88,6 +90,7 @@ Lite 模式避免把远端规则全文写入快照，生成 `rule-providers` 和
 - /：Web UI，必须登录。
 - /api/short-links：创建、列表、刷新、撤销、删除，必须鉴权。
 - /s/<code>：公开读取，短码本身作为 Bearer Credential。
+- /rules/clash-lite/*：公开读取，只暴露五个构建时同步的 provider 文件名。
 - /sub：原有长链转换接口，保持兼容。
 - /version：健康检查。
 
@@ -300,14 +303,16 @@ Clash YAML 解析器要同时兼容 dialer-proxy 和 underlying-proxy。/s/<code
 - SHORTLINK_ENCRYPTION_KEY
 - SHORTLINK_ENABLED=true
 - SHORTLINK_CLASH_CONFIG=config/default_clash_lite.ini
+- SHORTLINK_CLASH_RULESET_BASE_URL=
+- SHORTLINK_CLASH_RULESET_PROXY=
 - SHORTLINK_CLASH_EXPAND=false
 - SHORTLINK_LITE_MAX_OUTPUT_BYTES=262144
 
 镜像使用不可变 digest，保留旧镜像用于回滚。数据库发布前先备份。
 
-为 hi.example.com 新增独立 Nginx server block，不覆盖现有 api.example.com。Cloudflare Access 只保护 Web UI 和 /api/*；/s/*、/sub、/version 必须设置为绕过登录，以便订阅客户端和健康检查访问。Nginx 对 /api、/s、/sub 分别应用限流和禁缓存策略。
+为 hi.example.com 新增独立 Nginx server block，不覆盖现有 api.example.com。Cloudflare Access 只保护 Web UI 和 /api/*；/s/*、/sub、/version、/rules/clash-lite/* 必须设置为绕过登录，以便订阅客户端、provider 和健康检查访问。Nginx 对 /api、/s、/sub、/rules/clash-lite 分别应用限流；provider 允许短时公共缓存，其它订阅路径禁缓存。
 
-截至 2026-09-06，VPS 已确认存在 api.example.com 的 Nginx 配置；hi.example.com 已指向该 VPS 并复用 *.example.com Origin Certificate。当前 Cloudflare Access 应用覆盖整个 hi.example.com，/s/*、/sub、/version 仍会被重定向到登录页，必须在 Cloudflare 中新增更具体的 Bypass 路径或调整应用范围。当前 ubuntu 用户已具备 root/sudo 权限。
+截至 2026-09-06，VPS 已确认存在 api.example.com 的 Nginx 配置；hi.example.com 已指向该 VPS 并复用 *.example.com Origin Certificate。若 Cloudflare Access 应用覆盖整个 hi.example.com，必须为 /s/*、/sub、/version 和 /rules/clash-lite/* 配置更具体的 Bypass 路径或调整应用范围。
 
 ## 13. 验证与验收
 
@@ -328,7 +333,7 @@ API_KEY='test-user-api-key' BASE_URL='http://127.0.0.1:25500' ASSERT_LITE_OUTPUT
   bash tests/shortlink_api_smoke.sh
 ```
 
-脚本创建短链、读取 YAML、验证下载头、显式刷新、再次读取并撤销。`ASSERT_LITE_OUTPUT=1` 时还要求快照不超过 `LITE_MAX_SNAPSHOT_BYTES`（默认 262144），并验证输出同时包含 `rule-providers` 与 `RULE-SET` 引用。
+脚本创建短链、读取 YAML、验证下载头、显式刷新、再次读取并撤销。`ASSERT_LITE_OUTPUT=1` 时还要求快照不超过 `LITE_MAX_SNAPSHOT_BYTES`（默认 262144），恰好包含 5 个 provider、5 条 `RULE-SET`、30 条顶层规则、末尾 `MATCH`，并逐个下载 provider 验证 `payload:`。使用镜像时通过 `EXPECTED_CLASH_RULESET_BASE_URL` 声明期望前缀。
 
 ## 14. 实施阶段
 
